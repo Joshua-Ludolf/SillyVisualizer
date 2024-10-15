@@ -7,3 +7,8 @@
 * app.py - Flask Web Server Application (python)
 * requirements.txt - Required library versions for app.py
 * README.md - You're here :D !
+
+## To Run (In powershell terminal or cmd)
+-------------------------------------------------------------------------------------------------------------------
+1. pip install -r requirements.txt
+2. python app.py
