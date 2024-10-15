@@ -10,5 +10,11 @@
 
 ## To Run (In powershell terminal or cmd)
 -------------------------------------------------------------------------------------------------------------------
-1. pip install -r requirements.txt
-2. python app.py
+1. cd backend
+2. pip install -r requirements.txt
+3. python app.py
+
+-------------------------------------------------------------------------------------------------------------------
+1. cd frontend
+2. npx create-react-app .
+3. npm start
