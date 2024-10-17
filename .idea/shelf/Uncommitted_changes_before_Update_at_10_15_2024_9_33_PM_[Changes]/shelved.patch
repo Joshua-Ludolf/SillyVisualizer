@@ -1,0 +1,114 @@
+Index: templates/index.html
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+><!DOCTYPE html>\r\n<html>\r\n<head>\r\n    <title>SillyVisualizer</title>\r\n    <link rel=\"stylesheet\" type=\"text/css\" href='static/style.css'>\r\n</head>\r\n<body>\r\n    <h1>SillyVisualizer</h1>\r\n</body>\r\n</html>\r\n\r\n
+===================================================================
+diff --git a/templates/index.html b/templates/index.html
+--- a/templates/index.html	
++++ b/templates/index.html	
+@@ -1,11 +1,54 @@
+ <!DOCTYPE html>
+-<html>
++<html lang="en">
+ <head>
+-    <title>SillyVisualizer</title>
+-    <link rel="stylesheet" type="text/css" href='static/style.css'>
++    <meta charset="UTF-8">
++    <meta name="viewport" content="width=device-width, initial-scale=1.0">
++    <title>Code Visualizer</title>
++    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
++    <style>
++        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
++        textarea { width: 100%; height: 200px; }
++        #result { margin-top: 20px; }
++    </style>
+ </head>
+ <body>
+-    <h1>SillyVisualizer</h1>
++    <h1>Silly Visualizer</h1>
++    <form id="codeForm">
++        <label for="code">Enter your code:</label><br>
++        <textarea id="code" name="code" required></textarea><br>
++        <label for="language">Language:</label>
++        <select id="language" name="language">
++            <option value="python">Python</option>
++            <option value="java">Java</option>
++        </select><br>
++        <label for="diagram_type">Diagram Type:</label>
++        <select id="diagram_type" name="diagram_type">
++            <option value="ast">Abstract Syntax Tree (AST)</option>
++            <option value="cfg">Control Flow Graph (CFG)</option>
++            <option value="ddg">Data Dependency Graph (DDG)</option>
++        </select><br>
++        <input type="submit" value="Visualize">
++    </form>
++    <div id="result"></div>
++
++    <script>
++        $(document).ready(function() {
++            $('#codeForm').submit(function(e) {
++                e.preventDefault();
++                $.ajax({
++                    url: '/visualize',
++                    type: 'post',
++                    data: $('#codeForm').serialize(),
++                    success: function(response) {
++                        if (response.error) {
++                            $('#result').html('<p>Error: ' + response.error + '</p>');
++                        } else {
++                            $('#result').html('<h2>' + response.title + '</h2><img src="' + response.image + '" alt="Visualization">');
++                        }
++                    }
++                });
++            });
++        });
++    </script>
+ </body>
+-</html>
+-
++</html>
+\ No newline at end of file
+Index: app.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>\"\"\"\r\n    Group #9\r\n    Members: Joshua Ludolf, Samantha Jackson, Matthew Trevino, Jonathon Davis\r\n\r\n    Class: CSCI 4316 - Software Engineering 1\r\n\"\"\"\r\n\r\nfrom flask import Flask, render_template\r\n\r\napp = Flask(__name__)\r\n\r\n@app.route('/')\r\ndef home():\r\n    return render_template('index.html')\r\n\r\nif __name__ == '__main__':\r\n    app.run(debug=False)\r\n
+===================================================================
+diff --git a/app.py b/app.py
+--- a/app.py	
++++ b/app.py	
+@@ -1,11 +1,10 @@
+ """
+-    Group #9
+-    Members: Joshua Ludolf, Samantha Jackson, Matthew Trevino, Jonathon Davis
+-
+-    Class: CSCI 4316 - Software Engineering 1
++Group #9 Members: Joshua Ludolf, Samantha Jackson, Matthew Trevino, Jonathon Davis
++Class: CSCI 4316 - Software Engineering 1
+ """
+ 
+-from flask import Flask, render_template
++from flask import Flask, render_template, request, jsonify
++from SillyVisualizer import generate_visualization
+ 
+ app = Flask(__name__)
+ 
+@@ -13,5 +12,17 @@
+ def home():
+     return render_template('index.html')
+ 
++@app.route('/visualize', methods=['POST'])
++def visualize():
++    code = request.form['code']
++    language = request.form['language']
++    diagram_type = request.form['diagram_type']
++
++    try:
++        graph_image, title = generate_visualization(code, language, diagram_type)
++        return jsonify({"image": graph_image, "title": title})
++    except Exception as e:
++        return jsonify({"error": str(e)})
++
+ if __name__ == '__main__':
+-    app.run(debug=False)
++    app.run(debug=False)
+\ No newline at end of file

@@ -1,0 +1,143 @@
+Index: SillyVisualizer.py
+===================================================================
+diff --git a/SillyVisualizer.py b/SillyVisualizer.py
+new file mode 100644
+--- /dev/null	
++++ b/SillyVisualizer.py	
+@@ -0,0 +1,135 @@
++"""
++Group #9 Members: Joshua Ludolf, Samantha Jackson, Matthew Trevino, Jonathon Davis
++Class: CSCI 4316 - Software Engineering 1
++"""
++"""
++Leaving comments on imports. You can delete later ¯\_(ツ)_/¯
++PLEASE UPDATE HTML IT LOOKS SO MEH. I AM NOT GOOD USING HTML 
++also hi this is Matthew
++"""
++
++import ast  # Python Abstract Syntax Trees (AST).
++import javalang  # Parsing Java source code into an AST.
++from typing import List, Union  # For type annotations.
++import networkx as nx  # For creating and working with graphs (like AST, CFG, DDG).
++import matplotlib.pyplot as plt  # For drawing pretty pictures.
++import io  # For handling in-memory byte streams.
++import base64   # Turns images into strings because... why not?
++
++
++class ASTNode:
++    """Represents a node in the Abstract Syntax Tree (AST)."""
++    def __init__(self, type: str, value: str, children: List['ASTNode']):
++        self.type = type
++        self.value = value
++        self.children = children
++
++class AST:
++    """Wrapper for managing the root of the AST."""
++    def __init__(self, root: ASTNode):
++        self.root = root
++
++    def get_root(self) -> ASTNode:
++        return self.root
++
++class SourceCodeParser:
++    """Parses source code into ASTs for Python and Java."""
++    @staticmethod
++    def parse(source_code: str, language: str) -> AST:
++        if language == 'python':
++            tree = ast.parse(source_code)
++            return AST(SourceCodeParser._convert_python_ast(tree))
++        elif language == 'java':
++            tree = javalang.parse.parse(source_code)
++            return AST(SourceCodeParser._convert_java_ast(tree))
++        else:
++            raise ValueError(f"Unsupported language: {language}")
++
++    @staticmethod
++    def _convert_python_ast(node) -> ASTNode:
++        if isinstance(node, ast.AST):
++            children = [SourceCodeParser._convert_python_ast(child) for child in ast.iter_child_nodes(node)]
++            return ASTNode(type(node).__name__, getattr(node, 'name', ''), children)
++        elif isinstance(node, list):
++            return [SourceCodeParser._convert_python_ast(child) for child in node]
++        else:
++            return ASTNode(type(node).__name__, str(node), [])
++
++    @staticmethod
++    def _convert_java_ast(node) -> ASTNode:
++        if isinstance(node, javalang.ast.Node):
++            children = [SourceCodeParser._convert_java_ast(child) for child in node.children]
++            return ASTNode(type(node).__name__, getattr(node, 'name', ''), children)
++        elif isinstance(node, list):
++            return [SourceCodeParser._convert_java_ast(child) for child in node]
++        else:
++            return ASTNode(type(node).__name__, str(node), [])
++
++class DiagramGen:
++    """Generates diagrams from the AST: AST, CFG, and DDG."""
++    @staticmethod
++    def gen_ast_graph(ast: AST) -> nx.DiGraph:
++        G = nx.DiGraph()
++
++        def add_node(node: ASTNode, parent=None):
++            node_id = id(node)
++            G.add_node(node_id, label=f"{node.type}: {node.value}")
++            if parent:
++                G.add_edge(parent, node_id)
++            for child in node.children:
++                add_node(child, node_id)
++
++        add_node(ast.get_root())
++        return G
++
++    @staticmethod
++    def gen_cfg(ast: AST) -> nx.DiGraph:
++        G = nx.DiGraph()
++        G.add_edge("Start", "Process")
++        G.add_edge("Process", "End")
++        return G
++
++    @staticmethod
++    def gen_ddg(ast: AST) -> nx.DiGraph:
++        G = nx.DiGraph()
++        G.add_edge("Input", "Process")
++        G.add_edge("Process", "Output")
++        return G
++
++def plot_graph(G: nx.DiGraph) -> str:
++    """Plots the given graph and returns it as a base64-encoded PNG."""
++    plt.figure(figsize=(12, 8))
++    pos = nx.spring_layout(G)
++    nx.draw(G, pos, with_labels=True, node_color='lightblue',
++            node_size=2000, font_size=8, arrows=True)
++
++    labels = nx.get_node_attributes(G, 'label')
++    nx.draw_networkx_labels(G, pos, labels, font_size=6)
++
++    img = io.BytesIO()
++    plt.savefig(img, format='png')
++    img.seek(0)
++    graph_url = base64.b64encode(img.getvalue()).decode()
++    plt.close()
++    return f"data:image/png;base64,{graph_url}"
++
++def generate_visualization(code: str, language: str, diagram_type: str) -> tuple:
++    """Generates a visualization for the given code and diagram type.
++    Used in app.py
++    """
++    ast = SourceCodeParser.parse(code, language)
++
++    if diagram_type == 'ast':
++        graph = DiagramGen.gen_ast_graph(ast)
++        title = "Abstract Syntax Tree (AST)"
++    elif diagram_type == 'cfg':
++        graph = DiagramGen.gen_cfg(ast)
++        title = "Control Flow Graph (CFG)"
++    elif diagram_type == 'ddg':
++        graph = DiagramGen.gen_ddg(ast)
++        title = "Data Dependency Graph (DDG)"
++    else:
++        raise ValueError("Invalid diagram type")
++
++    graph_image = plot_graph(graph)
++    return graph_image, title
+\ No newline at end of file
