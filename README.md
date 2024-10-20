@@ -8,6 +8,9 @@
 * requirements.txt - Required library versions for app.py
 * README.md - You're here :D !
 
+
+pip install -r backend/requirements.txt
+
 ## To Run (In powershell terminal or cmd)
 -------------------------------------------------------------------------------------------------------------------
 1. cd backend
