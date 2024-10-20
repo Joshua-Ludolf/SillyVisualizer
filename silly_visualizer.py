@@ -5,13 +5,11 @@ Class: CSCI 4316 - Software Engineering 1
 
 import ast
 import javalang
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 import networkx as nx
 import matplotlib.pyplot as plt
 import io
 import base64
-from typing import Dict, Any
-
 
 class ASTNode:
     def __init__(self, type: str, value: str, children: List['ASTNode'], lineno: int = None):
@@ -20,11 +18,9 @@ class ASTNode:
         self.children = children
         self.lineno = lineno
 
-
 class SourceCodeParser:
     @staticmethod
     def parse(source_code: str, language: str) -> Tuple[nx.DiGraph, Dict[str, Any]]:
-        """Parse source code and return both AST and metadata."""
         if language == 'python':
             return SourceCodeParser._parse_python(source_code)
         elif language == 'java':
@@ -45,10 +41,9 @@ class SourceCodeParser:
 
         def add_node(node, parent_id=None):
             node_id = id(node)
-
-            # Extract node information
             node_type = type(node).__name__
             node_value = ""
+
             if isinstance(node, ast.FunctionDef):
                 node_value = f"Function: {node.name}"
                 metadata["functions"].append({
@@ -65,6 +60,11 @@ class SourceCodeParser:
                 })
             elif isinstance(node, ast.Name):
                 node_value = f"Name: {node.id}"
+                if isinstance(node.ctx, ast.Store):
+                    metadata["variables"].append({
+                        "name": node.id,
+                        "line": node.lineno
+                    })
             elif isinstance(node, ast.Import):
                 for name in node.names:
                     metadata["imports"].append({
@@ -73,16 +73,10 @@ class SourceCodeParser:
                         "line": node.lineno
                     })
 
-            # Add node to graph
-            G.add_node(node_id,
-                       type=node_type,
-                       value=node_value,
-                       lineno=getattr(node, 'lineno', None))
-
+            G.add_node(node_id, type=node_type, value=node_value, lineno=getattr(node, 'lineno', None))
             if parent_id is not None:
                 G.add_edge(parent_id, node_id)
 
-            # Process children
             for child in ast.iter_child_nodes(node):
                 add_node(child, node_id)
 
@@ -91,69 +85,80 @@ class SourceCodeParser:
 
     @staticmethod
     def _parse_java(source_code: str) -> Tuple[nx.DiGraph, Dict[str, Any]]:
-        tree = javalang.parse.parse(source_code)
-        G = nx.DiGraph()
-        metadata = {
-            "functions": [],
-            "classes": [],
-            "variables": [],
-            "imports": []
-        }
+        try:
+            tree = javalang.parse.parse(source_code)
+            G = nx.DiGraph()
+            metadata = {
+                "functions": [],
+                "classes": [],
+                "variables": [],
+                "imports": []
+            }
 
-        def add_node(node, parent_id=None):
-            node_id = id(node)
+            def process_node(node, parent_id=None):
+                node_id = id(node)
+                node_type = type(node).__name__
+                node_value = ""
 
-            # Extract node information
-            node_type = type(node).__name__
-            node_value = ""
+                # Handle different Java node types
+                if isinstance(node, javalang.tree.MethodDeclaration):
+                    node_value = f"Method: {node.name}"
+                    metadata["functions"].append({
+                        "name": node.name,
+                        "return_type": str(node.return_type) if node.return_type else "void",
+                        "modifiers": list(node.modifiers) if node.modifiers else []
+                    })
+                elif isinstance(node, javalang.tree.ClassDeclaration):
+                    node_value = f"Class: {node.name}"
+                    metadata["classes"].append({
+                        "name": node.name,
+                        "extends": node.extends.name if node.extends else None,
+                        "implements": [impl.name for impl in node.implements] if node.implements else []
+                    })
+                elif isinstance(node, javalang.tree.VariableDeclarator):
+                    node_value = f"Variable: {node.name}"
+                    metadata["variables"].append({
+                        "name": node.name,
+                        "type": str(node.type) if hasattr(node, 'type') else None
+                    })
+                elif isinstance(node, javalang.tree.Import):  # Changed from ImportDeclaration to Import
+                    path = '.'.join(node.path)
+                    node_value = f"Import: {path}"
+                    metadata["imports"].append({
+                        "path": path,
+                        "static": node.static if hasattr(node, 'static') else False,
+                        "wildcard": node.wildcard if hasattr(node, 'wildcard') else False
+                    })
 
-            if isinstance(node, javalang.tree.MethodDeclaration):
-                node_value = f"Method: {node.name}"
-                metadata["functions"].append({
-                    "name": node.name,
-                    "return_type": str(node.return_type),
-                    "modifiers": list(node.modifiers)
-                })
-            elif isinstance(node, javalang.tree.ClassDeclaration):
-                node_value = f"Class: {node.name}"
-                metadata["classes"].append({
-                    "name": node.name,
-                    "extends": node.extends.name if node.extends else None,
-                    "implements": [impl.name for impl in node.implements] if node.implements else []
-                })
-            elif isinstance(node, javalang.tree.ImportDeclaration):
-                metadata["imports"].append({
-                    "path": node.path,
-                    "static": node.static,
-                    "wildcard": node.wildcard
-                })
+                G.add_node(node_id, type=node_type, value=node_value)
+                if parent_id is not None:
+                    G.add_edge(parent_id, node_id)
 
-            # Add node to graph
-            G.add_node(node_id, type=node_type, value=node_value)
+                # Process all attributes of the node that might contain child nodes
+                for attr_name, attr_value in node.__dict__.items():
+                    if isinstance(attr_value, javalang.ast.Node):
+                        process_node(attr_value, node_id)
+                    elif isinstance(attr_value, list):
+                        for item in attr_value:
+                            if isinstance(item, javalang.ast.Node):
+                                process_node(item, node_id)
 
-            if parent_id is not None:
-                G.add_edge(parent_id, node_id)
+            process_node(tree)
+            if len(G.nodes()) == 0:
+                raise ValueError("No nodes were generated from the Java code")
 
-            # Process children
-            for child in node.children:
-                if isinstance(child, javalang.ast.Node):
-                    add_node(child, node_id)
-                elif isinstance(child, list):
-                    for item in child:
-                        if isinstance(item, javalang.ast.Node):
-                            add_node(item, node_id)
+            return G, metadata
 
-        add_node(tree)
-        return G, metadata
-
+        except Exception as e:
+            raise ValueError(f"Failed to parse Java code: {str(e)}")
 
 class DiagramGenerator:
     @staticmethod
     def generate_ast(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure:
         plt.figure(figsize=(15, 10))
-        pos = nx.spring_layout(G, k=1, iterations=50)
+        pos = nx.spring_layout(G, k=2, iterations=50)
 
-        # Draw nodes with different colors based on type
+        # Node styling
         node_colors = []
         node_sizes = []
         labels = {}
@@ -162,60 +167,93 @@ class DiagramGenerator:
             node_type = G.nodes[node]['type']
             node_value = G.nodes[node]['value']
 
-            if 'Function' in str(node_type) or 'Method' in str(node_type):
-                node_colors.append('#ff7f0e')  # Orange for functions
+            if 'Method' in node_type or 'Function' in str(node_value):
+                node_colors.append('#ff7f0e')  # Orange
                 node_sizes.append(2000)
-            elif 'Class' in str(node_type):
-                node_colors.append('#1f77b4')  # Blue for classes
+            elif 'Class' in node_type:
+                node_colors.append('#1f77b4')  # Blue
                 node_sizes.append(2500)
-            elif 'Import' in str(node_type):
-                node_colors.append('#2ca02c')  # Green for imports
+            elif 'Import' in str(node_value):
+                node_colors.append('#2ca02c')  # Green
+                node_sizes.append(1500)
+            elif 'Variable' in str(node_value):
+                node_colors.append('#9467bd')  # Purple
                 node_sizes.append(1500)
             else:
-                node_colors.append('#d62728')  # Red for other nodes
+                node_colors.append('#d62728')  # Red
                 node_sizes.append(1000)
 
-            # Create meaningful labels
-            labels[node] = f"{node_type}\n{node_value}" if node_value else node_type
+            # Truncate long labels
+            label = node_value if node_value else node_type
+            if len(label) > 30:
+                label = label[:27] + "..."
+            labels[node] = label
 
-        # Draw the graph
-        nx.draw(G, pos, node_color=node_colors, node_size=node_sizes,
-                labels=labels, with_labels=True, font_size=8,
-                font_weight='bold', arrows=True)
+        nx.draw(G, pos,
+                node_color=node_colors,
+                node_size=node_sizes,
+                labels=labels,
+                with_labels=True,
+                font_size=8,
+                font_weight='bold',
+                arrows=True,
+                edge_color='gray',
+                width=1,
+                arrowsize=10)
 
-        # Add title and legend
         plt.title("Abstract Syntax Tree (AST) Visualization", pad=20)
-
         return plt.gcf()
 
     @staticmethod
     def generate_cfg(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure:
         plt.figure(figsize=(15, 10))
-
-        # Create a control flow graph from the AST
         cfg = nx.DiGraph()
 
-        # Add function nodes
+        # Create CFG nodes for functions/methods
         for func in metadata["functions"]:
-            cfg.add_node(func["name"], type="function")
+            func_name = func["name"]
+            cfg.add_node(func_name, type="function")
+            entry_node = f"{func_name}_entry"
+            exit_node = f"{func_name}_exit"
 
-            # Add entry and exit nodes for each function
-            entry_node = f"{func['name']}_entry"
-            exit_node = f"{func['name']}_exit"
             cfg.add_node(entry_node, type="entry")
             cfg.add_node(exit_node, type="exit")
-            cfg.add_edge(entry_node, func["name"])
-            cfg.add_edge(func["name"], exit_node)
+            cfg.add_edge(entry_node, func_name)
+            cfg.add_edge(func_name, exit_node)
 
-        # Draw the CFG
-        pos = nx.spring_layout(cfg)
-        node_colors = ['#1f77b4' if cfg.nodes[node]['type'] == 'function' else
-                       '#2ca02c' if cfg.nodes[node]['type'] == 'entry' else
-                       '#d62728' for node in cfg.nodes()]
+        # If no functions were found, add a message node
+        if len(cfg.nodes()) == 0:
+            cfg.add_node("No functions found", type="message")
 
-        nx.draw(cfg, pos, node_color=node_colors, with_labels=True,
-                node_size=2000, font_size=10, font_weight='bold',
-                arrows=True)
+        # Draw CFG
+        pos = nx.spring_layout(cfg, k=2)
+        node_colors = []
+        node_sizes = []
+
+        for node in cfg.nodes():
+            if cfg.nodes[node]['type'] == 'function':
+                node_colors.append('#1f77b4')
+                node_sizes.append(2000)
+            elif cfg.nodes[node]['type'] == 'entry':
+                node_colors.append('#2ca02c')
+                node_sizes.append(1500)
+            elif cfg.nodes[node]['type'] == 'message':
+                node_colors.append('#d62728')
+                node_sizes.append(2000)
+            else:  # exit nodes
+                node_colors.append('#d62728')
+                node_sizes.append(1500)
+
+        nx.draw(cfg, pos,
+                node_color=node_colors,
+                node_size=node_sizes,
+                with_labels=True,
+                font_size=10,
+                font_weight='bold',
+                arrows=True,
+                edge_color='gray',
+                width=1,
+                arrowsize=10)
 
         plt.title("Control Flow Graph (CFG) Visualization", pad=20)
         return plt.gcf()
@@ -223,59 +261,92 @@ class DiagramGenerator:
     @staticmethod
     def generate_ddg(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure:
         plt.figure(figsize=(15, 10))
-
-        # Create a data dependency graph
         ddg = nx.DiGraph()
 
-        # Add variable nodes and their dependencies
-        for var in metadata.get("variables", []):
-            ddg.add_node(var["name"], type="variable")
+        # Add variables and their dependencies
+        var_nodes = set()
+        for var in metadata["variables"]:
+            var_name = var["name"]
+            var_nodes.add(var_name)
+            ddg.add_node(var_name, type="variable")
 
-        # Add function nodes and their dependencies
+        # Add functions and their variable dependencies
         for func in metadata["functions"]:
-            ddg.add_node(func["name"], type="function")
-            # Add edges for function arguments
-            for arg in func.get("args", []):
-                ddg.add_node(arg, type="argument")
-                ddg.add_edge(arg, func["name"])
+            func_name = func["name"]
+            ddg.add_node(func_name, type="function")
 
-        # Draw the DDG
-        pos = nx.spring_layout(ddg)
-        node_colors = ['#1f77b4' if ddg.nodes[node]['type'] == 'function' else
-                       '#2ca02c' if ddg.nodes[node]['type'] == 'variable' else
-                       '#d62728' for node in ddg.nodes()]
+            # Connect function arguments
+            if "args" in func:
+                for arg in func["args"]:
+                    ddg.add_node(arg, type="argument")
+                    ddg.add_edge(arg, func_name)
 
-        nx.draw(ddg, pos, node_color=node_colors, with_labels=True,
-                node_size=2000, font_size=10, font_weight='bold',
-                arrows=True)
+        # If no nodes were added, add a message node
+        if len(ddg.nodes()) == 0:
+            ddg.add_node("No data dependencies found", type="message")
+
+        # Draw DDG
+        pos = nx.spring_layout(ddg, k=2)
+        node_colors = []
+        node_sizes = []
+
+        for node in ddg.nodes():
+            node_type = ddg.nodes[node]['type']
+            if node_type == 'function':
+                node_colors.append('#1f77b4')
+                node_sizes.append(2000)
+            elif node_type == 'variable':
+                node_colors.append('#2ca02c')
+                node_sizes.append(1500)
+            elif node_type == 'message':
+                node_colors.append('#d62728')
+                node_sizes.append(2000)
+            else:  # arguments
+                node_colors.append('#ff7f0e')
+                node_sizes.append(1500)
+
+        nx.draw(ddg, pos,
+                node_color=node_colors,
+                node_size=node_sizes,
+                with_labels=True,
+                font_size=10,
+                font_weight='bold',
+                arrows=True,
+                edge_color='gray',
+                width=1,
+                arrowsize=10)
 
         plt.title("Data Dependency Graph (DDG) Visualization", pad=20)
         return plt.gcf()
 
-
 def generate_visualization(code: str, language: str, diagram_type: str) -> Tuple[str, str]:
     """Generate visualization for the given code and diagram type."""
-    # Parse the code
-    G, metadata = SourceCodeParser.parse(code, language)
+    try:
+        # Parse the code
+        G, metadata = SourceCodeParser.parse(code, language)
 
-    # Generate the appropriate diagram
-    if diagram_type == 'ast':
-        fig = DiagramGenerator.generate_ast(G, metadata)
-        title = "Abstract Syntax Tree (AST)"
-    elif diagram_type == 'cfg':
-        fig = DiagramGenerator.generate_cfg(G, metadata)
-        title = "Control Flow Graph (CFG)"
-    elif diagram_type == 'ddg':
-        fig = DiagramGenerator.generate_ddg(G, metadata)
-        title = "Data Dependency Graph (DDG)"
-    else:
-        raise ValueError(f"Unknown diagram type: {diagram_type}")
+        # Generate the appropriate diagram
+        if diagram_type == 'ast':
+            fig = DiagramGenerator.generate_ast(G, metadata)
+            title = "Abstract Syntax Tree (AST)"
+        elif diagram_type == 'cfg':
+            fig = DiagramGenerator.generate_cfg(G, metadata)
+            title = "Control Flow Graph (CFG)"
+        elif diagram_type == 'ddg':
+            fig = DiagramGenerator.generate_ddg(G, metadata)
+            title = "Data Dependency Graph (DDG)"
+        else:
+            raise ValueError(f"Unknown diagram type: {diagram_type}")
 
-    # Convert plot to base64 string
-    img_data = io.BytesIO()
-    fig.savefig(img_data, format='png', bbox_inches='tight')
-    img_data.seek(0)
-    plt.close(fig)
+        # Convert plot to base64 string
+        img_data = io.BytesIO()
+        fig.savefig(img_data, format='png', bbox_inches='tight')
+        img_data.seek(0)
+        plt.close(fig)
 
-    graph_url = base64.b64encode(img_data.getvalue()).decode()
-    return f"data:image/png;base64,{graph_url}", title
+        graph_url = base64.b64encode(img_data.getvalue()).decode()
+        return f"data:image/png;base64,{graph_url}", title
+
+    except Exception as e:
+        plt.close('all')  # Clean up any open figures
+        raise ValueError(f"Visualization failed: {str(e)}")
