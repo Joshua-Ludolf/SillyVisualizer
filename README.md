@@ -9,9 +9,12 @@
 * README.md - You're here :D !
 
 
-pip install -r backend/requirements.txt
+
 
 ## To Run (In powershell terminal or cmd)
+
+pip install -r backend/requirements.txt
+
 -------------------------------------------------------------------------------------------------------------------
 1. cd backend
 2. pip install -r requirements.txt
