@@ -3,48 +3,390 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Silly Visualizer</title>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <title>Silly Code Visualizer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/panzoom/9.4.0/panzoom.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
     <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-        textarea { width: 100%; height: 200px; }
-        #result { margin-top: 20px; }
+        .drag-area {
+            border: 2px dashed #7c3aed;
+            border-radius: 5px;
+            padding: 20px;
+            text-align: center;
+            transition: border 0.3s ease;
+        }
+        .drag-area.active {
+            border-color: #4c1d95;
+        }
+        .code-editor {
+            font-family: 'Courier New', Courier, monospace;
+            resize: vertical;
+        }
+        .visualization-container {
+            position: relative;
+            overflow: hidden;
+            width: 100%;
+            height: 500px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            cursor: grab;
+        }
+        .visualization-container:active {
+            cursor: grabbing;
+        }
+        .zoom-controls {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 4px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .zoom-btn {
+            background: white;
+            border: 1px solid #7c3aed;
+            padding: 5px 10px;
+            margin: 2px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .zoom-btn:hover {
+            background: #7c3aed;
+            color: white;
+        }
+        #result {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #result img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
     </style>
 </head>
-<body>
-    <h1>Silly Visualizer</h1>
-    <form id="codeForm">
-        <label for="code">Enter your code:</label><br>
-        <textarea id="code" name="code" required></textarea><br>
-        <label for="language">Language:</label>
-        <select id="language" name="language">
-            <option value="python">Python</option>
-            <option value="java">Java</option>
-        </select><br>
-        <label for="diagram_type">Diagram Type:</label>
-        <select id="diagram_type" name="diagram_type">
-            <option value="ast">Abstract Syntax Tree (AST)</option>
-            <option value="cfg">Control Flow Graph (CFG)</option>
-            <option value="ddg">Data Dependency Graph (DDG)</option>
-        </select><br>
-        <input type="submit" value="Visualize">
-    </form>
-    <div id="result"></div>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+       <!-- Header -->
+        <div class="flex items-center justify-center space-x-4 mb-8">
+            <img src="https://media.tenor.com/OuKpQVljC28AAAAe/blehhhhh-cat.png"
+                 alt="Cat sticking out tongue 1"
+                 class="w-20 h-20 rounded-full">
+            <h1 class="text-4xl font-bold text-purple-600">Silly Visualizer</h1>
+            <img src="https://media.tenor.com/OuKpQVljC28AAAAe/blehhhhh-cat.png"
+                 alt="Cat sticking out tongue 2"
+                 class="w-20 h-20 rounded-full">
+        </div>
+
+
+        <!-- Main Content -->
+        <div class="grid md:grid-cols-2 gap-8">
+            <!-- Left Column: Input -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <form id="codeForm">
+                    <!-- Input Method Tabs -->
+                    <div class="border-b border-gray-200 mb-4">
+                        <nav class="flex -mb-px" aria-label="Tabs">
+                            <button type="button" class="input-method-tab px-4 py-2 font-medium text-sm border-b-2 border-purple-500" data-target="editor">
+                                Type/Paste Code
+                            </button>
+                            <button type="button" class="input-method-tab px-4 py-2 font-medium text-sm text-gray-500 hover:text-gray-700" data-target="file">
+                                Upload/Drop File
+                            </button>
+                        </nav>
+                    </div>
+
+                    <!-- Code Editor Section -->
+                    <div id="editorSection" class="input-section mb-4">
+                        <textarea
+                            id="codeEditor"
+                            name="code"
+                            class="code-editor mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 h-64"
+                            placeholder="Type or paste your code here..."
+                        ></textarea>
+                    </div>
+
+                    <!-- File Upload & Drag Drop Section -->
+                    <div id="fileSection" class="input-section hidden mb-4">
+                        <div class="drag-area mt-1 flex flex-col justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md h-64">
+                            <div class="space-y-1 text-center">
+                                <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                                </svg>
+                                <div class="flex text-sm text-gray-600 justify-center">
+                                    <label for="fileInput" class="relative cursor-pointer bg-white rounded-md font-medium text-purple-600 hover:text-purple-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-purple-500">
+                                        <span>Upload a file</span>
+                                        <input id="fileInput" name="file" type="file" class="sr-only" accept=".py,.java">
+                                    </label>
+                                    <p class="pl-1">or drag and drop</p>
+                                </div>
+                                <p class="text-xs text-gray-500">Python (.py) or Java (.java) files only</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Form Controls -->
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label for="language" class="block text-sm font-medium text-gray-700">Language</label>
+                            <select id="language" name="language" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500">
+                                <option value="auto">Auto Detect</option>
+                                <option value="python">Python</option>
+                                <option value="java">Java</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="diagram_type" class="block text-sm font-medium text-gray-700">Diagram Type</label>
+                            <select id="diagram_type" name="diagram_type" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500">
+                                <option value="ast">Abstract Syntax Tree (AST)</option>
+                                <option value="cfg">Control Flow Graph (CFG)</option>
+                                <option value="ddg">Data Dependency Graph (DDG)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500">
+                        Visualize Code
+                    </button>
+                </form>
+            </div>
+
+            <!-- Right Column: Visualization -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <div id="visualizationArea" class="mb-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-bold">Visualization</h2>
+                        <button id="saveAsPng" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors hidden">
+                            Save as PNG
+                        </button>
+                    </div>
+                    <div id="loading" class="hidden">
+                        <p class="text-center text-gray-500">Generating visualization...</p>
+                    </div>
+                    <div class="visualization-container">
+                        <div class="zoom-controls">
+                            <button class="zoom-btn" id="zoomIn" title="Zoom In">+</button>
+                            <button class="zoom-btn" id="zoomOut" title="Zoom Out">-</button>
+                            <button class="zoom-btn" id="resetZoom" title="Reset View">↺</button>
+                        </div>
+                        <div id="result" class="w-full h-full">
+                            <!-- Visualization will be displayed here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Code Statistics -->
+                <div id="codeStats" class="hidden">
+                    <h2 class="text-xl font-semibold mb-4">Code Statistics</h2>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="stat-card p-4 bg-purple-50 rounded-lg">
+                            <p class="text-sm text-gray-600">Lines of Code</p>
+                            <p class="text-2xl font-bold text-purple-600" id="linesOfCode">-</p>
+                        </div>
+                        <div class="stat-card p-4 bg-purple-50 rounded-lg">
+                            <p class="text-sm text-gray-600">Functions</p>
+                            <p class="text-2xl font-bold text-purple-600" id="functionCount">-</p>
+                        </div>
+                        <div class="stat-card p-4 bg-purple-50 rounded-lg">
+                            <p class="text-sm text-gray-600">Classes</p>
+                            <p class="text-2xl font-bold text-purple-600" id="classCount">-</p>
+                        </div>
+                        <div class="stat-card p-4 bg-purple-50 rounded-lg">
+                            <p class="text-sm text-gray-600">Characters</p>
+                            <p class="text-2xl font-bold text-purple-600" id="charCount">-</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script>
         $(document).ready(function() {
+            let panzoomInstance = null;
+
+            // Tab switching
+            $('.input-method-tab').click(function() {
+                $('.input-method-tab').removeClass('border-purple-500').addClass('text-gray-500');
+                $(this).addClass('border-purple-500').removeClass('text-gray-500');
+
+                const target = $(this).data('target');
+                $('.input-section').addClass('hidden');
+                $(`#${target}Section`).removeClass('hidden');
+            });
+
+            // Language detection
+            function detectLanguage(code) {
+                const pythonIndicators = ['def ', 'import ', 'print(', '__init__', 'self.'];
+                const javaIndicators = ['public class', 'private ', 'void ', 'String[]', ';'];
+
+                let pythonScore = pythonIndicators.filter(ind => code.includes(ind)).length;
+                let javaScore = javaIndicators.filter(ind => code.includes(ind)).length;
+
+                return pythonScore >= javaScore ? 'python' : 'java';
+            }
+
+            // Initialize panzoom
+            function initPanzoom() {
+                const element = document.querySelector('#result');
+                if (element && !panzoomInstance) {
+                    panzoomInstance = panzoom(element, {
+                        maxZoom: 5,
+                        minZoom: 0.1,
+                        bounds: true,
+                        boundsPadding: 0.1
+                    });
+                }
+            }
+
+            // File handling
+            const dragArea = $('.drag-area');
+            const fileInput = $('#fileInput');
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dragArea.on(eventName, preventDefaults);
+                document.body.addEventListener(eventName, preventDefaults);
+            });
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dragArea.on(eventName, () => dragArea.addClass('active'));
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dragArea.on(eventName, () => dragArea.removeClass('active'));
+            });
+
+            dragArea.on('drop', handleDrop);
+            fileInput.on('change', function() {
+                handleFile(this.files[0]);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            function handleDrop(e) {
+                const file = e.originalEvent.dataTransfer.files[0];
+                handleFile(file);
+            }
+
+            function handleFile(file) {
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const code = e.target.result;
+                    $('#codeEditor').val(code);
+
+                    if ($('#language').val() === 'auto') {
+                        const detectedLang = detectLanguage(code);
+                        $('#language').val(detectedLang);
+                    }
+                };
+                reader.readAsText(file);
+            }
+
+            // Zoom controls
+            $('#zoomIn').click(() => panzoomInstance && panzoomInstance.zoomIn());
+            $('#zoomOut').click(() => panzoomInstance && panzoomInstance.zoomOut());
+            $('#resetZoom').click(() => {
+                if (panzoomInstance) {
+                    panzoomInstance.reset();
+                    panzoomInstance.moveTo(0, 0);
+                }
+            });
+
+            // Save as PNG
+            $('#saveAsPng').click(function() {
+                const img = $('#result img');
+                if (img.length) {
+                    const link = document.createElement('a');
+                    link.download = 'visualization.png';
+                    link.href = img.attr('src');
+                    document.body.appendChild(link);
+document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+            });
+
+            // Form submission
             $('#codeForm').submit(function(e) {
                 e.preventDefault();
+
+                // Reset and show loading state
+                $('#loading').removeClass('hidden');
+                $('#result').empty();
+                $('#codeStats').addClass('hidden');
+                $('#saveAsPng').addClass('hidden');
+
+                // Clear any existing panzoom instance
+                if (panzoomInstance) {
+                    panzoomInstance.dispose();
+                    panzoomInstance = null;
+                }
+
+                const formData = new FormData(this);
+                const code = $('#codeEditor').val();
+
+                if (code) {
+                    if (formData.get('language') === 'auto') {
+                        formData.set('language', detectLanguage(code));
+                    }
+                    formData.set('code', code);
+                }
+
                 $.ajax({
                     url: '/visualize',
                     type: 'post',
-                    data: $('#codeForm').serialize(),
+                    data: formData,
+                    processData: false,
+                    contentType: false,
                     success: function(response) {
+                        $('#loading').addClass('hidden');
+
                         if (response.error) {
-                            $('#result').html('<p>Error: ' + response.error + '</p>');
+                            $('#result').html(
+                                `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                                    ${response.error}
+                                </div>`
+                            );
                         } else {
-                            $('#result').html('<h2>' + response.title + '</h2><img src="' + response.image + '" alt="Visualization">');
+                            // Display visualization
+                            $('#result').html(
+                                `<img src="${response.image}" alt="Code Visualization" />`
+                            );
+
+                            // Initialize panzoom after image is loaded
+                            $('#result img').on('load', function() {
+                                initPanzoom();
+                                $('#saveAsPng').removeClass('hidden');
+                            });
+
+                            // Update code statistics if available
+                            if (response.code_stats) {
+                                $('#codeStats').removeClass('hidden');
+                                $('#linesOfCode').text(response.code_stats.lines_of_code);
+                                $('#functionCount').text(response.code_stats.functions);
+                                $('#classCount').text(response.code_stats.classes);
+                                $('#charCount').text(response.code_stats.characters);
+                            }
                         }
+                    },
+                    error: function(xhr, status, error) {
+                        $('#loading').addClass('hidden');
+                        $('#result').html(
+                            `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                                An error occurred while processing your request: ${error}
+                            </div>`
+                        );
                     }
                 });
             });
