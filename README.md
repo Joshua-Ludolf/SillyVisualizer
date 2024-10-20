@@ -24,3 +24,10 @@ pip install -r backend/requirements.txt
 1. cd frontend
 2. npx create-react-app .
 3. npm start
+
+   
+
+## If you pull and add additional modules/libraries run the following command in a terminal
+
+-------------------------------------------------------------------------------------------------------------------
+pip freeze > requirements.txt
