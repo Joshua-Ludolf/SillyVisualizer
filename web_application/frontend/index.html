@@ -1,0 +1,155 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Silly Code Visualizer</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/panzoom/9.4.0/panzoom.min.js"></script>
+    <link rel="stylesheet" href="frontend/style.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <script src="frontend/script.js"></script>
+    <script>
+        const backendUrl = 'http://localhost:5000'; // backend url - allows for convinient connection to backend
+    </script>
+    
+    
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+       <!-- Header -->
+        <div class="flex items-center justify-center space-x-4 mb-8">
+            <img src="https://media.tenor.com/OuKpQVljC28AAAAe/blehhhhh-cat.png"
+                 alt="Cat sticking out tongue 1"
+                 class="w-20 h-20 rounded-full">
+            <h1 class="text-4xl font-bold text-purple-600">Silly Visualizer</h1>
+            <img src="https://media.tenor.com/OuKpQVljC28AAAAe/blehhhhh-cat.png"
+                 alt="Cat sticking out tongue 2"
+                 class="w-20 h-20 rounded-full">
+        </div>
+
+
+        <!-- Main Content -->
+        <div class="grid md:grid-cols-2 gap-8">
+            <!-- Left Column: Input -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <form id="codeForm">
+                    <!-- Input Method Tabs -->
+                    <div class="border-b border-gray-200 mb-4">
+                        <nav class="flex -mb-px" aria-label="Tabs">
+                            <button type="button" class="input-method-tab px-4 py-2 font-medium text-sm border-b-2 border-purple-500" data-target="editor">
+                                Type/Paste Code
+                            </button>
+                            <button type="button" class="input-method-tab px-4 py-2 font-medium text-sm text-gray-500 hover:text-gray-700" data-target="file">
+                                Upload/Drop File
+                            </button>
+                        </nav>
+                    </div>
+
+                    <!-- Code Editor Section -->
+                    <div id="editorSection" class="input-section mb-4">
+                        <textarea
+                            id="codeEditor"
+                            name="code"
+                            class="code-editor mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 h-64"
+                            placeholder="Type or paste your code here..."
+                        ></textarea>
+                    </div>
+
+                    <!-- File Upload & Drag Drop Section -->
+                    <div id="fileSection" class="input-section hidden mb-4">
+                        <div class="drag-area mt-1 flex flex-col justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md h-64">
+                            <div class="space-y-1 text-center">
+                                <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                                </svg>
+                                <div class="flex text-sm text-gray-600 justify-center">
+                                    <label for="fileInput" class="relative cursor-pointer bg-white rounded-md font-medium text-purple-600 hover:text-purple-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-purple-500">
+                                        <span>Upload a file</span>
+                                        <input id="fileInput" name="file" type="file" class="sr-only" accept=".py,.java">
+                                    </label>
+                                    <p class="pl-1">or drag and drop</p>
+                                </div>
+                                <p class="text-xs text-gray-500">Python (.py) or Java (.java) files only</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Form Controls -->
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label for="language" class="block text-sm font-medium text-gray-700">Language</label>
+                            <select id="language" name="language" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500">
+                                <option value="auto">Auto Detect</option>
+                                <option value="python">Python</option>
+                                <option value="java">Java</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="diagram_type" class="block text-sm font-medium text-gray-700">Diagram Type</label>
+                            <select id="diagram_type" name="diagram_type" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500">
+                                <option value="ast">Abstract Syntax Tree (AST)</option>
+                                <option value="cfg">Control Flow Graph (CFG)</option>
+                                <option value="ddg">Data Dependency Graph (DDG)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500" >
+                        Visualize Code
+                    </button>
+                </form>
+            </div>
+
+            <!-- Right Column: Visualization -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <div id="visualizationArea" class="mb-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-bold">Visualization</h2>
+                        <button id="saveAsPng" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors hidden">
+                            Save as PNG
+                        </button>
+                    </div>
+                    <div id="loading" class="hidden">
+                        <p class="text-center text-gray-500">Generating visualization...</p>
+                    </div>
+                    <div class="visualization-container">
+                        <div class="zoom-controls">
+                            <button class="zoom-btn" id="zoomIn" title="Zoom In">+</button>
+                            <button class="zoom-btn" id="zoomOut" title="Zoom Out">-</button>
+                            <button class="zoom-btn" id="resetZoom" title="Reset View">↺</button>
+                        </div>
+                        <div id="result" class="w-full h-full">
+                            <!-- Visualization will be displayed here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Code Statistics -->
+                <div id="codeStats" class="hidden">
+                    <h2 class="text-xl font-semibold mb-4">Code Statistics</h2>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="stat-card p-4 bg-purple-50 rounded-lg">
+                            <p class="text-sm text-gray-600">Lines of Code</p>
+                            <p class="text-2xl font-bold text-purple-600" id="linesOfCode">-</p>
+                        </div>
+                        <div class="stat-card p-4 bg-purple-50 rounded-lg">
+                            <p class="text-sm text-gray-600">Functions</p>
+                            <p class="text-2xl font-bold text-purple-600" id="functionCount">-</p>
+                        </div>
+                        <div class="stat-card p-4 bg-purple-50 rounded-lg">
+                            <p class="text-sm text-gray-600">Classes</p>
+                            <p class="text-2xl font-bold text-purple-600" id="classCount">-</p>
+                        </div>
+                        <div class="stat-card p-4 bg-purple-50 rounded-lg">
+                            <p class="text-sm text-gray-600">Characters</p>
+                            <p class="text-2xl font-bold text-purple-600" id="charCount">-</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+</body>
+</html>
