@@ -14,6 +14,13 @@
 ## To Run (In PowerShell terminal or cmd)
 -------------------------------------------------------------------------------------------------------------------
 1. cd backend
+
+
+
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+
 2. pip install -r requirements.txt
 3. python app.py    or    manually run file with the play button if error occurs
 
