@@ -9,7 +9,7 @@
 
 
 
-<h2>To Run (In PowerShell terminal or cmd)</h2><br>
+<h2>To execute backend.py</h2><br>
 <i>
 1. python -m venv .venv (venv should be under main directory (SillyVisualizer), not under web_application directory)<br>
 2.   <dl>
