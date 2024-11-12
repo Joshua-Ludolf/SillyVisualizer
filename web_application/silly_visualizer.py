@@ -12,6 +12,15 @@ import io
 import base64
 
 class ASTNode:
+    """
+    Represents a node in an Abstract Syntax Tree (AST).
+
+    Attributes:
+        type (str): The type of the AST node.
+        value (str): The value associated with the AST node.
+        children (List[ASTNode]): A list of child AST nodes.
+        lineno (int, optional): The line number in the source code where this node is found. Defaults to None.
+    """
     def __init__(self, type: str, value: str, children: List['ASTNode'], lineno: int = None):
         self.type = type
         self.value = value
@@ -19,6 +28,17 @@ class ASTNode:
         self.lineno = lineno
 
 class SourceCodeParser:
+    """
+    A class used to parse source code and generate a directed graph representation along with metadata.
+    Methods
+    -------
+    parse(source_code: str, language: str) -> Tuple[nx.DiGraph, Dict[str, Any]]:
+        Parses the given source code based on the specified language and returns a directed graph and metadata.
+    _parse_python(source_code: str) -> Tuple[nx.DiGraph, Dict[str, Any]]:
+        Parses Python source code and returns a directed graph and metadata.
+    _parse_java(source_code: str) -> Tuple[nx.DiGraph, Dict[str, Any]]:
+        Parses Java source code and returns a directed graph and metadata.
+    """
     @staticmethod
     def parse(source_code: str, language: str) -> Tuple[nx.DiGraph, Dict[str, Any]]:
         if language == 'python':
@@ -153,6 +173,17 @@ class SourceCodeParser:
             raise ValueError(f"Failed to parse Java code: {str(e)}")
 
 class DiagramGenerator:
+    """
+    A class used to generate various types of diagrams for visualizing code structures.
+    Methods
+    -------
+    generate_ast(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure
+        Generates an Abstract Syntax Tree (AST) visualization from a directed graph.
+    generate_cfg(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure
+        Generates a Control Flow Graph (CFG) visualization from a directed graph.
+    generate_ddg(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure
+        Generates a Data Dependency Graph (DDG) visualization from a directed graph.
+    """
     @staticmethod
     def generate_ast(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure:
         plt.figure(figsize=(15, 10))
