@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_from_directory, json
 from werkzeug.utils import secure_filename
 import os
-from silly_visualizer import generate_visualization
+from silly_visualizer import generate_visualization, SourceCodeParser
 import ast
 import re
 import threading
@@ -82,9 +82,8 @@ Request Parameters:
     diagram_type (optional): The type of diagram to generate. Defaults to 'ast'.
 Returns:
     JSON: A JSON object containing the following keys:
-        - image: The generated visualization image.
+        - graph_data: The generated visualization graph data.
         - title: The title of the visualization.
-        - code_stats: Analysis of the provided code.
         - language_used: The detected or specified programming language.
         - uploaded_file (optional): The name of the uploaded file, if a file was uploaded.
         - error (optional): An error message if an error occurred during processing.
@@ -93,46 +92,22 @@ Raises:
 """
 @app.route('/visualize', methods=['POST'])
 def visualize_code():
-    """
-    Generate code visualization based on input parameters.
-    
-    Expected JSON payload:
-    {
-        'code': str,       # Source code to visualize
-        'language': str,   # Programming language ('python' or 'java')
-        'diagram_type': str # Type of diagram ('ast', 'cfg', 'ddg')
-    }
-    
-    Returns:
-        JSON response with visualization details
-    """
-    # Log full request details for debugging
-    app.logger.info(f"Request headers: {dict(request.headers)}")
-    app.logger.info(f"Request content type: {request.content_type}")
-    app.logger.info(f"Request data: {request.get_data(as_text=True)}")
-
     try:
-        # Attempt to parse JSON data
+        # Parse request data
         if request.is_json:
             data = request.get_json()
         else:
-            # Fallback to manual parsing
-            try:
-                data = json.loads(request.data.decode('utf-8'))
-            except Exception:
-                # Last resort: try form data
-                data = {
-                    'code': request.form.get('code', ''),
-                    'language': request.form.get('language', ''),
-                    'diagram_type': request.form.get('diagram_type', 'ast')
-                }
+            data = {
+                'code': request.form.get('code', ''),
+                'language': request.form.get('language', ''),
+                'diagram_type': request.form.get('diagram_type', 'ast')
+            }
         
         # Validate input
         code = data.get('code', '').strip()
         language = data.get('language', '').lower()
         diagram_type = data.get('diagram_type', 'ast').lower()
         
-        # Perform additional validation
         if not code:
             return jsonify({
                 'error': 'Missing code',
@@ -140,22 +115,56 @@ def visualize_code():
             }), 400
         
         if language not in ['python', 'java']:
-            # Auto-detect language if not specified correctly
             language = 'python' if 'def ' in code or 'import ' in code else 'java'
         
         if diagram_type not in ['ast', 'cfg', 'ddg']:
-            diagram_type = 'ast'  # Default to AST
+            diagram_type = 'ast'
         
         # Generate visualization
         try:
-            svg_base64, title, parsing_metadata = generate_visualization(code, language, diagram_type)
+            # Create a NetworkX graph from the code
+            parser = SourceCodeParser()
+            G, metadata = parser.parse(code, language)
+            
+            # Convert NetworkX graph to D3.js format
+            nodes = []
+            links = []
+            
+            # Process nodes
+            for node in G.nodes():
+                node_data = G.nodes[node]
+                nodes.append({
+                    'id': str(node),
+                    'label': str(node),
+                    'type': node_data.get('type', 'default'),
+                    'color': _get_node_color(node_data.get('type', 'default')),
+                    'value': node_data.get('value', '')
+                })
+            
+            # Process edges
+            for source, target in G.edges():
+                links.append({
+                    'source': str(source),
+                    'target': str(target)
+                })
+            
+            # Generate title based on diagram type
+            title_map = {
+                'ast': 'Abstract Syntax Tree',
+                'cfg': 'Control Flow Graph',
+                'ddg': 'Data Dependency Graph'
+            }
+            title = title_map.get(diagram_type, 'Code Visualization')
             
             return jsonify({
-                'svg_base64': svg_base64,  # Base64 encoded SVG
+                'graph_data': {
+                    'nodes': nodes,
+                    'links': links
+                },
                 'title': title,
                 'language': language,
                 'diagram_type': diagram_type,
-                'parsing_metadata': parsing_metadata
+                'parsing_metadata': metadata
             })
         except Exception as viz_error:
             app.logger.error(f"Visualization generation error: {str(viz_error)}")
@@ -165,7 +174,6 @@ def visualize_code():
             }), 500
     
     except Exception as e:
-        # Comprehensive error handling
         app.logger.error(f"Request processing error: {str(e)}")
         return jsonify({
             'error': 'Request processing failed',
@@ -174,36 +182,52 @@ def visualize_code():
 
 def _get_node_color(node_type: str) -> str:
     """
-    Generate a color based on node type with enhanced color palette
+    Generate a color based on the node type for more granular visualization.
     
     Args:
-        node_type (str): Type of the node
+        node_type (str): Type of the AST node
     
     Returns:
-        str: Hex color code
+        str: Hex color code for the node
     """
+    # Comprehensive color mapping for different node types
     color_map = {
-        # Python AST Node Colors
-        'Module': '#2C3E50',       # Dark Blue-Gray for root/module
-        'ClassDef': '#3498DB',     # Bright Blue for classes
-        'FunctionDef': '#2ECC71',  # Green for functions
-        'AsyncFunctionDef': '#1ABC9C',  # Teal for async functions
-        'Name': '#F39C12',         # Orange for variables
-        'Attribute': '#9B59B6',    # Purple for attributes
-        'Call': '#E74C3C',         # Red for function calls
+        # Python-specific node types
+        'Module': '#2C3E50',           # Dark blue-gray for module/file level
+        'ClassDef': '#3498DB',         # Bright blue for class definitions
+        'FunctionDef': '#2ECC71',      # Green for function definitions
+        'AsyncFunctionDef': '#27AE60',  # Darker green for async functions
         
-        # Java AST Node Colors
-        'ClassDeclaration': '#3498DB',  # Blue for Java classes
-        'MethodDeclaration': '#2ECC71', # Green for Java methods
-        'VariableDeclaration': '#F39C12', # Orange for Java variables
+        # Variable and attribute types
+        'Name': '#F39C12',             # Orange for variable names
+        'Attribute': '#9B59B6',        # Purple for attributes
+        'Constant': '#E67E22',         # Warm orange for constants
         
-        # Control Flow Nodes
-        'If': '#E67E22',           # Orange for if statements
-        'For': '#16A085',          # Teal for for loops
-        'While': '#D35400',        # Dark Orange for while loops
+        # Control flow nodes
+        'If': '#E74C3C',               # Red for if statements
+        'For': '#3498DB',              # Blue for for loops
+        'While': '#9B59B6',            # Purple for while loops
+        'Try': '#1ABC9C',              # Teal for try blocks
+        'Except': '#F1C40F',           # Yellow for except blocks
         
-        # Default Fallback
-        'default': '#34495E'       # Slate Gray for unknown types
+        # Expression and call types
+        'Call': '#16A085',             # Teal for function calls
+        'BinOp': '#D35400',            # Dark orange for binary operations
+        'Compare': '#8E44AD',          # Deep purple for comparisons
+        
+        # Import and module-related
+        'Import': '#34495E',           # Dark slate gray for imports
+        'ImportFrom': '#2980B9',       # Slightly lighter blue for from imports
+        
+        # Java-specific node types
+        'ClassDeclaration': '#3498DB',     # Blue for Java classes
+        'MethodDeclaration': '#2ECC71',    # Green for Java methods
+        'FieldDeclaration': '#F39C12',     # Orange for Java fields
+        'ConstructorDeclaration': '#E74C3C', # Red for constructors
+        'InterfaceDeclaration': '#9B59B6',  # Purple for interfaces
+        
+        # Default fallback
+        'default': '#95A5A6'           # Light gray for unrecognized types
     }
     
     return color_map.get(node_type, color_map['default'])

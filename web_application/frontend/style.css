@@ -60,6 +60,51 @@
     color: white;
 }
 
+/* Zoom controls */
+.zoom-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 1000;
+}
+
+.zoom-button {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: white;
+    color: #4a5568;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: all 0.2s ease;
+}
+
+.zoom-button:hover {
+    background: #f7fafc;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.zoom-button:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Ensure graph container allows for zooming */
+.graph-content {
+    cursor: grab;
+}
+
+.graph-content:active {
+    cursor: grabbing;
+}
+
 /* Enhanced tooltip styling */
 .tooltip-container {
     position: absolute;
@@ -89,32 +134,50 @@
 /* Legend styling */
 .legend {
     background: white;
+    border: 1px solid #e2e8f0;
     border-radius: 8px;
     padding: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    position: absolute;
-    top: 16px;
-    left: 16px;
-    z-index: 900;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    z-index: 1000;
+    max-width: 250px;
     font-size: 14px;
-    max-width: 200px;
+}
+
+.legend-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #2d3748;
 }
 
 .legend-item {
     display: flex;
     align-items: center;
-    margin-bottom: 8px;
+    margin: 6px 0;
+    font-size: 12px;
+    color: #4a5568;
 }
 
 .legend-color {
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     margin-right: 8px;
+    flex-shrink: 0;
 }
 
 .legend-text {
-    color: #4A5568;
+    line-height: 1.4;
+}
+
+/* Visualization container positioning */
+.visualization-container {
+    position: relative;
+}
+
+/* Ensure legend is visible over the graph */
+#result {
+    position: relative;
 }
 
 /* Reset view button styling */
@@ -179,6 +242,164 @@
         font-size: 12px;
         max-width: 240px;
     }
+}
+
+/* Graph container */
+#result {
+    width: 100%;
+    height: 600px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+/* D3.js Graph Visualization Styles */
+#result {
+    width: 100%;
+    height: 100%;
+    background-color: #ffffff;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+#result svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.node {
+    cursor: pointer;
+    transition: opacity 0.3s ease;
+}
+
+.node:hover {
+    opacity: 0.8;
+}
+
+.node circle {
+    stroke: #fff;
+    stroke-width: 1.5px;
+}
+
+.node text {
+    font-size: 10px;
+    font-family: Arial, sans-serif;
+    pointer-events: none;
+    text-anchor: middle;
+    fill: #fff;
+    dominant-baseline: middle;
+}
+
+.link {
+    stroke: #999;
+    stroke-opacity: 0.6;
+    stroke-width: 1px;
+    marker-end: url(#arrowhead);
+}
+
+/* Node type colors */
+.node-Module circle { fill: #2C3E50; }
+.node-ClassDef circle, .node-ClassDeclaration circle { fill: #3498DB; }
+.node-FunctionDef circle, .node-MethodDeclaration circle { fill: #2ECC71; }
+.node-Name circle { fill: #F39C12; }
+.node-Attribute circle { fill: #9B59B6; }
+.node-Call circle { fill: #16A085; }
+.node-If circle, .node-For circle, .node-While circle { fill: #E74C3C; }
+
+/* Enhanced tooltip */
+#nodeTooltip {
+    position: absolute;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 1000;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    max-width: 200px;
+    transition: opacity 0.2s ease;
+}
+
+/* Loading indicator */
+#loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 1000;
+}
+
+#loading:after {
+    content: '';
+    display: block;
+    width: 40px;
+    height: 40px;
+    margin: 10px auto;
+    border-radius: 50%;
+    border: 3px solid #7c3aed;
+    border-top-color: transparent;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* D3.js Graph Styles */
+.node {
+    cursor: grab;
+}
+
+.node:active {
+    cursor: grabbing;
+}
+
+.node circle {
+    transition: r 0.2s, fill 0.2s;
+}
+
+.node:hover circle {
+    r: 25;
+}
+
+.node text {
+    font-family: Arial, sans-serif;
+    font-size: 10px;
+    transition: font-size 0.2s;
+    fill: #000;
+    pointer-events: none;
+    user-select: none;
+}
+
+.node:hover text {
+    font-size: 12px;
+}
+
+.link {
+    stroke: #999;
+    stroke-width: 1px;
+    stroke-opacity: 0.6;
+    marker-end: url(#arrowhead);
+    transition: stroke-opacity 0.2s;
+}
+
+.link:hover {
+    stroke-opacity: 1;
+}
+
+/* Arrowhead marker */
+#arrowhead {
+    fill: #999;
+}
+
+#result svg {
+    width: 100%;
+    height: 100%;
 }
 
 #result {

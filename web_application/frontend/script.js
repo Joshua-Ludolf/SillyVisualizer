@@ -1,6 +1,10 @@
 // Init panzoom
 
 $(document).ready(function() {
+    // Initialize graph visualizer
+    window.graphVisualizer = new GraphVisualizer('result');
+    window.graphVisualizer.initialize();
+
     let panzoomInstance = null;
 
     // Tab switching
@@ -399,55 +403,58 @@ $(document).ready(function() {
             dataType: 'json',
             success: function(response) {
                 $('#loading').addClass('hidden');
+                console.log('Response:', response);  // Debug log
 
                 if (response.error) {
+                    console.error('Server error:', response.error);  // Debug log
                     $('#result').html(
                         `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
                             ${response.error}: ${response.details}
                         </div>`
                     );
                 } else {
-                    // Decode base64 SVG and display
-                    const svgContent = atob(response.svg_base64);
-                    
-                    // Create a container with specific styling for consistent display
-                    const svgContainer = document.createElement('div');
-                    svgContainer.style.width = '100%';
-                    svgContainer.style.maxWidth = '1200px';
-                    svgContainer.style.margin = '0 auto';
-                    svgContainer.style.display = 'flex';
-                    svgContainer.style.justifyContent = 'center';
-                    svgContainer.style.alignItems = 'center';
-                    
-                    // Create img element with data URI
-                    const svgImg = document.createElement('img');
-                    svgImg.src = `data:image/svg+xml;base64,${response.svg_base64}`;
-                    svgImg.style.maxWidth = '100%';
-                    svgImg.style.maxHeight = '800px';
-                    svgImg.style.objectFit = 'contain';
-                    
-                    // Ensure high contrast and readability
-                    svgImg.style.filter = 'contrast(120%) brightness(100%)';
-                    
-                    // Append to container
-                    svgContainer.appendChild(svgImg);
-                    
-                    // Clear previous content and add new SVG
-                    const visualizationContainer = document.getElementById('result');
-                    visualizationContainer.innerHTML = '';
-                    visualizationContainer.appendChild(svgContainer);
-                    
-                    setupDiagramInteraction();
-                    $('#saveAsPng').removeClass('hidden');
+                    try {
+                        console.log('Graph data:', response.graph_data);  // Debug log
+                        
+                        if (!response.graph_data || !response.graph_data.nodes || !response.graph_data.links) {
+                            throw new Error('Invalid graph data structure');
+                        }
+                        
+                        // Clear previous visualization
+                        $('#result').empty();
+                        
+                        // Create a new instance and initialize it
+                        window.graphVisualizer = new GraphVisualizer('result');
+                        window.graphVisualizer.initialize();
+                        
+                        // Update with the new graph data
+                        window.graphVisualizer.update(response.graph_data);
+                        
+                        $('#saveAsPng').removeClass('hidden');
+                    } catch (err) {
+                        console.error('Visualization error:', err);  // Debug log
+                        $('#result').html(
+                            `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                                Visualization error: ${err.message}
+                            </div>`
+                        );
+                    }
                 }
             },
             error: function(xhr, status, error) {
                 $('#loading').addClass('hidden');
-                console.error('Visualization error:', xhr.responseJSON);
+                console.error('AJAX error:', { xhr, status, error });  // Debug log
+                
+                let errorMessage = 'An error occurred while processing your request';
+                if (xhr.responseJSON && xhr.responseJSON.details) {
+                    errorMessage += ': ' + xhr.responseJSON.details;
+                } else if (error) {
+                    errorMessage += ': ' + error;
+                }
+                
                 $('#result').html(
                     `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                        An error occurred while processing your request: 
-                        ${xhr.responseJSON?.details || error}
+                        ${errorMessage}
                     </div>`
                 );
             }
@@ -456,7 +463,8 @@ $(document).ready(function() {
 
     // Save as PNG with improved quality
     $('#saveAsPng').click(function() {
-        const svgElement = $('#result img')[0];
+        // Get the SVG element
+        const svgElement = $('#result svg')[0];
         if (!svgElement) return;
 
         // Create a canvas with higher resolution
@@ -464,20 +472,30 @@ $(document).ready(function() {
         const ctx = canvas.getContext('2d');
         const scale = 2; // Higher resolution scale
 
-        // Create a new image for better quality conversion
+        // Get SVG dimensions
+        const bbox = svgElement.getBBox();
+        const width = bbox.width;
+        const height = bbox.height;
+
+        // Set canvas size
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+
+        // Create SVG data URL
+        const svgData = new XMLSerializer().serializeToString(svgElement);
+        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+        const svgUrl = URL.createObjectURL(svgBlob);
+
+        // Create image and draw to canvas
         const img = new Image();
         img.onload = function() {
-            // Set canvas size to match the scaled image
-            canvas.width = img.width * scale;
-            canvas.height = img.height * scale;
-
             // Set background to white
             ctx.fillStyle = 'white';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             // Draw image with improved quality
             ctx.scale(scale, scale);
-            ctx.drawImage(img, 0, 0);
+            ctx.drawImage(img, 0, 0, width, height);
 
             try {
                 // Convert to PNG with maximum quality
@@ -493,19 +511,22 @@ $(document).ready(function() {
                 document.body.appendChild(downloadLink);
                 downloadLink.click();
                 document.body.removeChild(downloadLink);
-            } catch (error) {
-                console.error('Error saving image:', error);
-                alert('Failed to save the image. Please try again.');
+
+                // Clean up
+                URL.revokeObjectURL(svgUrl);
+            } catch (err) {
+                console.error('Error saving PNG:', err);
+                alert('Error saving visualization: ' + err.message);
             }
         };
 
-        // Handle load errors
         img.onerror = function() {
-            console.error('Error loading image for conversion');
-            alert('Failed to load the image for conversion. Please try again.');
+            console.error('Error loading SVG for PNG conversion');
+            alert('Error loading visualization for saving');
+            URL.revokeObjectURL(svgUrl);
         };
 
-        // Load the SVG image
-        img.src = svgElement.src;
+        // Load the SVG data
+        img.src = svgUrl;
     });
 });
