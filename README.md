@@ -16,7 +16,7 @@
       <dd>I) .venv\Scripts\activate (windows)</dd>
       <dd>II) source venv/bin/activate (linux)</dd>
     </dl>
-3. pip install -r requirements.txt<br>
+3. pip install -r .\web_application\requirements.txt<br>
 4. 4. cd web_application<br>
 5. python backend.py  or manually run file with the play button if error occurs<br>
 </i>
