@@ -127,7 +127,7 @@
                     link.download = 'visualization.png';
                     link.href = img.attr('src');
                     document.body.appendChild(link);
-document.body.appendChild(link);
+                    document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
                 }
