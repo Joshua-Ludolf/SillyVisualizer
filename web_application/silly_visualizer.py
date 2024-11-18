@@ -249,7 +249,11 @@ class DiagramGenerator:
         nx.draw_networkx_edges(G, pos, arrowstyle='-|>', arrowsize=15, edge_color='gray', width=1)
 
         # Draw labels on nodes
-        nx.draw_networkx_labels(G, pos, labels=labels, font_size=10, font_weight='bold', font_color='white')
+        nx.draw_networkx_labels(
+            G, pos, labels=labels,
+            font_size=10, font_weight='bold', font_color='black',
+            bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', boxstyle='round,pad=0.3')
+        )
 
         # Title for the plot
         plt.title("Abstract Syntax Tree (AST) Visualization", pad=20)
@@ -316,8 +320,12 @@ class DiagramGenerator:
 
         # Draw labels on nodes
         labels = {node: node for node in cfg.nodes()}
-        nx.draw_networkx_labels(cfg, pos, labels=labels, font_size=10, font_weight='bold', font_color='white')
-
+        nx.draw_networkx_labels(
+            cfg, pos, labels=labels,
+            font_size=10, font_weight='bold', font_color='black',
+            bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', boxstyle='round,pad=0.3')
+        )
+        
         # Title for the plot
         plt.title("Control Flow Graph (CFG) Visualization", pad=20)
 
@@ -389,8 +397,11 @@ class DiagramGenerator:
 
         # Draw labels on nodes
         labels = {node: node for node in ddg.nodes()}
-        nx.draw_networkx_labels(ddg, pos, labels=labels, font_size=10, font_weight='bold', font_color='white')
-
+        nx.draw_networkx_labels(
+            ddg, pos, labels=labels,
+            font_size=10, font_weight='bold', font_color='black',
+            bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', boxstyle='round,pad=0.3')
+        )
         # Title for the plot
         plt.title("Data Dependency Graph (DDG) Visualization", pad=20)
 
