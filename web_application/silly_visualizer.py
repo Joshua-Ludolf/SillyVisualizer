@@ -186,83 +186,57 @@ class DiagramGenerator:
     """
     @staticmethod
     def generate_ast(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure:
-        # Create the figure with a larger size for clarity
         plt.figure(figsize=(15, 10))
-    
-        # Layout for nodes with a bit more space for readability
-        pos = nx.spring_layout(G, k=0.15, iterations=200)
+        pos = nx.spring_layout(G, k=2, iterations=50)
 
-        # Define color palette and node shapes
+        # Node styling
         node_colors = []
         node_sizes = []
-        node_shapes = []
         labels = {}
 
-      # Color mapping based on node type
-        color_map = {
-            'Method': '#FF6347',   # Tomato for Methods/Functions
-            'Function': '#FF6347', # Tomato for Functions
-            'Class': '#4682B4',    # SteelBlue for Classes
-            'Import': '#32CD32',   # LimeGreen for Imports
-            'Variable': '#8A2BE2', # BlueViolet for Variables
-            'default': '#D3D3D3'    # LightGray for other nodes
-        }
-
-        # Iterate through the nodes to assign colors, sizes, and labels
         for node in G.nodes():
-            node_type = G.nodes[node].get('type', '')
-            node_value = G.nodes[node].get('value', '')
+            node_type = G.nodes[node]['type']
+            node_value = G.nodes[node]['value']
 
-            # Assign colors based on node type
             if 'Method' in node_type or 'Function' in str(node_value):
-                node_colors.append(color_map['Method'])
+                node_colors.append('#ff7f0e')  # Orange
                 node_sizes.append(2000)
-                node_shapes.append('o')  # Circle shape for methods/functions
             elif 'Class' in node_type:
-                node_colors.append(color_map['Class'])
+                node_colors.append('#1f77b4')  # Blue
                 node_sizes.append(2500)
-                node_shapes.append('s')  # Square shape for classes
             elif 'Import' in str(node_value):
-                node_colors.append(color_map['Import'])
+                node_colors.append('#2ca02c')  # Green
                 node_sizes.append(1500)
-                node_shapes.append('D')  # Diamond shape for imports
             elif 'Variable' in str(node_value):
-                node_colors.append(color_map['Variable'])
+                node_colors.append('#9467bd')  # Purple
                 node_sizes.append(1500)
-                node_shapes.append('v')  # Triangle shape for variables
             else:
-                node_colors.append(color_map['default'])
+                node_colors.append('#d62728')  # Red
                 node_sizes.append(1000)
-                node_shapes.append('o')  # Default shape is circle
 
-            # Create truncated labels if needed
+            # Truncate long labels
             label = node_value if node_value else node_type
             if len(label) > 30:
                 label = label[:27] + "..."
             labels[node] = label
 
-        # Draw the graph
-        for node, shape in zip(G.nodes(), node_shapes):
-            nx.draw_networkx_nodes(G, pos, nodelist=[node], node_color=[node_colors[G.nodes[node]]], node_size=[node_sizes[G.nodes[node]]], node_shape=shape)
+        nx.draw(G, pos,
+                node_color=node_colors,
+                node_size=node_sizes,
+                labels=labels,
+                with_labels=True,
+                font_size=8,
+                font_weight='bold',
+                arrows=True,
+                edge_color='gray',
+                width=1,
+                arrowsize=10)
 
-        # Draw edges (with arrows for direction)
-        nx.draw_networkx_edges(G, pos, arrowstyle='-|>', arrowsize=15, edge_color='gray', width=1)
-
-        # Draw labels on nodes
-        nx.draw_networkx_labels(
-            G, pos, labels=labels,
-            font_size=10, font_weight='bold', font_color='black',
-            bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', boxstyle='round,pad=0.3')
-        )
-
-        # Title for the plot
         plt.title("Abstract Syntax Tree (AST) Visualization", pad=20)
-
         return plt.gcf()
 
     @staticmethod
     def generate_cfg(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure:
-        # Create a new figure with a larger size for clarity
         plt.figure(figsize=(15, 10))
         cfg = nx.DiGraph()
 
@@ -278,62 +252,45 @@ class DiagramGenerator:
             cfg.add_edge(entry_node, func_name)
             cfg.add_edge(func_name, exit_node)
 
-        # If no functions are found, add a message node
+        # If no functions were found, add a message node
         if len(cfg.nodes()) == 0:
             cfg.add_node("No functions found", type="message")
 
-        # Define color palette and node shapes
+        # Draw CFG
+        pos = nx.spring_layout(cfg, k=2)
         node_colors = []
         node_sizes = []
-        node_shapes = []
 
-        # Color and shape mappings
-        color_map = {
-            'function': '#FF6347',  # Tomato for function nodes
-            'entry': '#32CD32',     # LimeGreen for entry nodes
-            'exit': '#FFD700',      # Gold for exit nodes
-            'message': '#D3D3D3',   # LightGray for message node
-        }
-
-        shape_map = {
-            'function': 'o',   # Circle for function nodes
-            'entry': 's',      # Square for entry nodes
-            'exit': '^',       # Triangle for exit nodes
-            'message': 'D',    # Diamond for message node
-        }
-
-        # Assign colors, sizes, and shapes based on node type
         for node in cfg.nodes():
-            node_type = cfg.nodes[node]['type']
-            
-            # Assign colors, sizes, and shapes based on node type
-            node_colors.append(color_map.get(node_type, '#d62728'))  # Default to red
-            node_sizes.append(2000 if node_type == 'function' else 1500)
-            node_shapes.append(shape_map.get(node_type, 'o'))  # Default to circle
+            if cfg.nodes[node]['type'] == 'function':
+                node_colors.append('#1f77b4')
+                node_sizes.append(2000)
+            elif cfg.nodes[node]['type'] == 'entry':
+                node_colors.append('#2ca02c')
+                node_sizes.append(1500)
+            elif cfg.nodes[node]['type'] == 'message':
+                node_colors.append('#d62728')
+                node_sizes.append(2000)
+            else:  # exit nodes
+                node_colors.append('#d62728')
+                node_sizes.append(1500)
 
-        # Draw the graph with different node shapes and colors
-        for node, shape in zip(cfg.nodes(), node_shapes):
-            nx.draw_networkx_nodes(cfg, pos, nodelist=[node], node_color=[node_colors[cfg.nodes[node]]], node_size=[node_sizes[cfg.nodes[node]]], node_shape=shape)
+        nx.draw(cfg, pos,
+                node_color=node_colors,
+                node_size=node_sizes,
+                with_labels=True,
+                font_size=10,
+                font_weight='bold',
+                arrows=True,
+                edge_color='gray',
+                width=1,
+                arrowsize=10)
 
-        # Draw edges with arrows for direction
-        nx.draw_networkx_edges(cfg, pos, arrowstyle='-|>', arrowsize=15, edge_color='gray', width=1)
-
-        # Draw labels on nodes
-        labels = {node: node for node in cfg.nodes()}
-        nx.draw_networkx_labels(
-            cfg, pos, labels=labels,
-            font_size=10, font_weight='bold', font_color='black',
-            bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', boxstyle='round,pad=0.3')
-        )
-        
-        # Title for the plot
         plt.title("Control Flow Graph (CFG) Visualization", pad=20)
-
         return plt.gcf()
 
     @staticmethod
     def generate_ddg(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure:
-        # Create the figure with a larger size for clarity
         plt.figure(figsize=(15, 10))
         ddg = nx.DiGraph()
 
@@ -359,53 +316,40 @@ class DiagramGenerator:
         if len(ddg.nodes()) == 0:
             ddg.add_node("No data dependencies found", type="message")
 
-        # Define color palette and node shapes
+        # Draw DDG
+        pos = nx.spring_layout(ddg, k=2)
         node_colors = []
         node_sizes = []
-        node_shapes = []
 
-        # Color and shape mappings
-        color_map = {
-            'function': '#FF6347',  # Tomato for function nodes
-            'variable': '#32CD32',  # LimeGreen for variable nodes
-            'message': '#D3D3D3',   # LightGray for message node
-            'argument': '#FF8C00',  # DarkOrange for argument nodes
-        }
-
-        shape_map = {
-            'function': 'o',    # Circle for function nodes
-            'variable': 's',    # Square for variable nodes
-            'message': 'D',     # Diamond for message node
-            'argument': '^',    # Triangle for argument nodes
-        }
-
-        # Assign colors, sizes, and shapes based on node type
         for node in ddg.nodes():
             node_type = ddg.nodes[node]['type']
-            
-            # Assign colors, sizes, and shapes based on node type
-            node_colors.append(color_map.get(node_type, '#d62728'))  # Default to red
-            node_sizes.append(2000 if node_type == 'function' else 1500)
-            node_shapes.append(shape_map.get(node_type, 'o'))  # Default to circle
+            if node_type == 'function':
+                node_colors.append('#1f77b4')
+                node_sizes.append(2000)
+            elif node_type == 'variable':
+                node_colors.append('#2ca02c')
+                node_sizes.append(1500)
+            elif node_type == 'message':
+                node_colors.append('#d62728')
+                node_sizes.append(2000)
+            else:  # arguments
+                node_colors.append('#ff7f0e')
+                node_sizes.append(1500)
 
-        # Draw the graph with different node shapes and colors
-        for node, shape in zip(ddg.nodes(), node_shapes):
-            nx.draw_networkx_nodes(ddg, pos, nodelist=[node], node_color=[node_colors[ddg.nodes[node]]], node_size=[node_sizes[ddg.nodes[node]]], node_shape=shape)
+        nx.draw(ddg, pos,
+                node_color=node_colors,
+                node_size=node_sizes,
+                with_labels=True,
+                font_size=10,
+                font_weight='bold',
+                arrows=True,
+                edge_color='gray',
+                width=1,
+                arrowsize=10)
 
-        # Draw edges with arrows for direction
-        nx.draw_networkx_edges(ddg, pos, arrowstyle='-|>', arrowsize=15, edge_color='gray', width=1)
-
-        # Draw labels on nodes
-        labels = {node: node for node in ddg.nodes()}
-        nx.draw_networkx_labels(
-            ddg, pos, labels=labels,
-            font_size=10, font_weight='bold', font_color='black',
-            bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', boxstyle='round,pad=0.3')
-        )
-        # Title for the plot
         plt.title("Data Dependency Graph (DDG) Visualization", pad=20)
-
         return plt.gcf()
+
 
 def generate_visualization(code: str, language: str, diagram_type: str) -> Tuple[str, str]:
     """Generate visualization for the given code and diagram type."""
