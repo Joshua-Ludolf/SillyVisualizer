@@ -1,6 +1,12 @@
 // Init panzoom
     $(document).ready(function() {
-            let panzoomInstance = null;
+            // Initialize Panzoom on the #result container for image rendering
+            const panzoomInstance = panzoom(document.querySelector('#result'), {
+                zoomSpeed: 0.1, // Controls the zoom speed
+                minZoom: 0.1,   // Minimum zoom level (don't allow zooming out too far)
+                maxZoom: 5,     // Maximum zoom level (don't allow zooming in too far)
+                contain: 'outside', // Prevents the content from overflowing the container
+            });
 
             // Tab switching
             $('.input-method-tab').click(function() {
@@ -23,18 +29,18 @@
                 return pythonScore >= javaScore ? 'python' : 'java';
             }
 
-            // Initialize panzoom
-            function initPanzoom() {
-                const element = document.querySelector('#result');
-                if (element && !panzoomInstance) {
-                    panzoomInstance = panzoom(element, {
-                        maxZoom: 5,
-                        minZoom: 0.1,
-                        bounds: true,
-                        boundsPadding: 0.1
-                    });
-                }
-            }
+            // // Initialize panzoom
+            // function initPanzoom() {
+            //     const element = document.querySelector('#result');
+            //     if (element && !panzoomInstance) {
+            //         panzoomInstance = panzoom(element, {
+            //             maxZoom: 5,
+            //             minZoom: 0.1,
+            //             bounds: true,
+            //             boundsPadding: 0.1
+            //         });
+            //     }
+            // }
 
             // File handling
             const dragArea = $('.drag-area');
@@ -85,14 +91,33 @@
             }
 
             // Zoom controls
-            $('#zoomIn').click(() => panzoomInstance && panzoomInstance.zoomIn());
-            $('#zoomOut').click(() => panzoomInstance && panzoomInstance.zoomOut());
-            $('#resetZoom').click(() => {
-                if (panzoomInstance) {
-                    panzoomInstance.reset();
-                    panzoomInstance.moveTo(0, 0);
-                }
+            // $('#zoomIn').click(() => panzoomInstance && panzoomInstance.zoomIn());
+            // $('#zoomOut').click(() => panzoomInstance && panzoomInstance.zoomOut());
+            // $('#resetZoom').click(() => {
+            //     if (panzoomInstance) {
+            //         panzoomInstance.reset();
+            //         panzoomInstance.moveTo(0, 0);
+            //     }
+            // });
+
+            // Zoom controls updated 11-18-2024
+            // zoomIn function; Increases zoom
+            $('#zoomIn').click(function() {
+                panzoomInstance.zoomIn()
             });
+            // zoomOut function; Decreases zoom
+            $('#zoomOut').click(function () {
+                panzoomInstance.zoomOut();
+            });
+            // resetZoom function; Reset to zoom 1
+            $('#resetZoom').click(function () {
+                panzoomInstance.reset();
+            });
+            // panning function
+            $('#result').on('mousedown', function (e) {
+                panzoomInstance.panTo(e.pageX, e.pageY);
+            });
+
 
             // Save as PNG
             $('#saveAsPng').click(function() {
