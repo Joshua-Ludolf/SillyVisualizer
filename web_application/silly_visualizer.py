@@ -258,6 +258,7 @@ class DiagramGenerator:
 
     @staticmethod
     def generate_cfg(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure:
+        # Create a new figure with a larger size for clarity
         plt.figure(figsize=(15, 10))
         cfg = nx.DiGraph()
 
@@ -273,41 +274,53 @@ class DiagramGenerator:
             cfg.add_edge(entry_node, func_name)
             cfg.add_edge(func_name, exit_node)
 
-        # If no functions were found, add a message node
+        # If no functions are found, add a message node
         if len(cfg.nodes()) == 0:
             cfg.add_node("No functions found", type="message")
 
-        # Draw CFG
-        pos = nx.spring_layout(cfg, k=2)
+        # Define color palette and node shapes
         node_colors = []
         node_sizes = []
+        node_shapes = []
 
+        # Color and shape mappings
+        color_map = {
+            'function': '#FF6347',  # Tomato for function nodes
+            'entry': '#32CD32',     # LimeGreen for entry nodes
+            'exit': '#FFD700',      # Gold for exit nodes
+            'message': '#D3D3D3',   # LightGray for message node
+        }
+
+        shape_map = {
+            'function': 'o',   # Circle for function nodes
+            'entry': 's',      # Square for entry nodes
+            'exit': '^',       # Triangle for exit nodes
+            'message': 'D',    # Diamond for message node
+        }
+
+        # Assign colors, sizes, and shapes based on node type
         for node in cfg.nodes():
-            if cfg.nodes[node]['type'] == 'function':
-                node_colors.append('#1f77b4')
-                node_sizes.append(2000)
-            elif cfg.nodes[node]['type'] == 'entry':
-                node_colors.append('#2ca02c')
-                node_sizes.append(1500)
-            elif cfg.nodes[node]['type'] == 'message':
-                node_colors.append('#d62728')
-                node_sizes.append(2000)
-            else:  # exit nodes
-                node_colors.append('#d62728')
-                node_sizes.append(1500)
+            node_type = cfg.nodes[node]['type']
+            
+            # Assign colors, sizes, and shapes based on node type
+            node_colors.append(color_map.get(node_type, '#d62728'))  # Default to red
+            node_sizes.append(2000 if node_type == 'function' else 1500)
+            node_shapes.append(shape_map.get(node_type, 'o'))  # Default to circle
 
-        nx.draw(cfg, pos,
-                node_color=node_colors,
-                node_size=node_sizes,
-                with_labels=True,
-                font_size=10,
-                font_weight='bold',
-                arrows=True,
-                edge_color='gray',
-                width=1,
-                arrowsize=10)
+        # Draw the graph with different node shapes and colors
+        for node, shape in zip(cfg.nodes(), node_shapes):
+            nx.draw_networkx_nodes(cfg, pos, nodelist=[node], node_color=[node_colors[cfg.nodes[node]]], node_size=[node_sizes[cfg.nodes[node]]], node_shape=shape)
 
+        # Draw edges with arrows for direction
+        nx.draw_networkx_edges(cfg, pos, arrowstyle='-|>', arrowsize=15, edge_color='gray', width=1)
+
+        # Draw labels on nodes
+        labels = {node: node for node in cfg.nodes()}
+        nx.draw_networkx_labels(cfg, pos, labels=labels, font_size=10, font_weight='bold', font_color='white')
+
+        # Title for the plot
         plt.title("Control Flow Graph (CFG) Visualization", pad=20)
+
         return plt.gcf()
 
     @staticmethod
