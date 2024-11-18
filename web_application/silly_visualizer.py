@@ -192,13 +192,12 @@ class DiagramGenerator:
         # Layout for nodes with a bit more space for readability
         pos = nx.spring_layout(G, k=0.15, iterations=200)
 
-        # Define color palette and node shapes
-        node_colors = []
-        node_sizes = []
-        node_shapes = []
-        labels = {}
+        # Prepare node colors, sizes, and shapes before drawing
+        node_color_dict = {}
+        node_size_dict = {}
+        node_shape_dict = {}
 
-      # Color mapping based on node type
+        # Color mapping based on node type
         color_map = {
             'Method': '#FF6347',   # Tomato for Methods/Functions
             'Function': '#FF6347', # Tomato for Functions
@@ -215,48 +214,69 @@ class DiagramGenerator:
 
             # Assign colors based on node type
             if 'Method' in node_type or 'Function' in str(node_value):
-                node_colors.append(color_map['Method'])
-                node_sizes.append(2000)
-                node_shapes.append('o')  # Circle shape for methods/functions
+                node_color_dict[node] = color_map['Method']
+                node_size_dict[node] = 2000
+                node_shape_dict[node] = 'o'  # Circle shape for methods/functions
             elif 'Class' in node_type:
-                node_colors.append(color_map['Class'])
-                node_sizes.append(2500)
-                node_shapes.append('s')  # Square shape for classes
+                node_color_dict[node] = color_map['Class']
+                node_size_dict[node] = 2500
+                node_shape_dict[node] = 's'  # Square shape for classes
             elif 'Import' in str(node_value):
-                node_colors.append(color_map['Import'])
-                node_sizes.append(1500)
-                node_shapes.append('D')  # Diamond shape for imports
+                node_color_dict[node] = color_map['Import']
+                node_size_dict[node] = 1500
+                node_shape_dict[node] = 'D'  # Diamond shape for imports
             elif 'Variable' in str(node_value):
-                node_colors.append(color_map['Variable'])
-                node_sizes.append(1500)
-                node_shapes.append('v')  # Triangle shape for variables
+                node_color_dict[node] = color_map['Variable']
+                node_size_dict[node] = 1500
+                node_shape_dict[node] = 'v'  # Triangle shape for variables
             else:
-                node_colors.append(color_map['default'])
-                node_sizes.append(1000)
-                node_shapes.append('o')  # Default shape is circle
-
-            # Create truncated labels if needed
-            label = node_value if node_value else node_type
-            if len(label) > 30:
-                label = label[:27] + "..."
-            labels[node] = label
+                node_color_dict[node] = color_map['default']
+                node_size_dict[node] = 1000
+                node_shape_dict[node] = 'o'  # Default shape is circle
 
         # Draw the graph
-        for node, shape in zip(G.nodes(), node_shapes):
-            nx.draw_networkx_nodes(G, pos, nodelist=[node], node_color=[node_colors[G.nodes[node]]], node_size=[node_sizes[G.nodes[node]]], node_shape=shape)
+        plt.clf()  # Clear the current figure
+        plt.figure(figsize=(15, 10))
+        plt.title("Abstract Syntax Tree (AST) Visualization", pad=20)
+        
+        # Use a larger figure and adjust subplot parameters for better visibility
+        plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
+        
+        # Enable interactive pan and zoom
+        plt.rcParams['toolbar'] = 'toolmanager'
+        
+        # Draw nodes
+        for node in G.nodes():
+            nx.draw_networkx_nodes(G, pos, 
+                                   nodelist=[node], 
+                                   node_color=[node_color_dict[node]], 
+                                   node_size=[node_size_dict[node]], 
+                                   node_shape=node_shape_dict[node])
 
         # Draw edges (with arrows for direction)
         nx.draw_networkx_edges(G, pos, arrowstyle='-|>', arrowsize=15, edge_color='gray', width=1)
 
         # Draw labels on nodes
+        labels = {node: (node_value if node_value else node_type)[:30] + 
+                  ("..." if len(node_value or node_type) > 30 else "") 
+                  for node, node_value in nx.get_node_attributes(G, 'value').items()}
+        
         nx.draw_networkx_labels(
             G, pos, labels=labels,
             font_size=10, font_weight='bold', font_color='black',
             bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', boxstyle='round,pad=0.3')
         )
 
-        # Title for the plot
-        plt.title("Abstract Syntax Tree (AST) Visualization", pad=20)
+        # Set plot limits to show entire graph
+        x_values = [x for x, y in pos.values()]
+        y_values = [y for x, y in pos.values()]
+        x_margin = (max(x_values) - min(x_values)) * 0.1
+        y_margin = (max(y_values) - min(y_values)) * 0.1
+        plt.xlim(min(x_values) - x_margin, max(x_values) + x_margin)
+        plt.ylim(min(y_values) - y_margin, max(y_values) + y_margin)
+        
+        # Remove axis for cleaner look
+        plt.axis('off')
 
         return plt.gcf()
 
@@ -312,6 +332,17 @@ class DiagramGenerator:
             node_shapes.append(shape_map.get(node_type, 'o'))  # Default to circle
 
         # Draw the graph with different node shapes and colors
+        pos = nx.spring_layout(cfg, k=0.15, iterations=200)
+        plt.clf()  # Clear the current figure
+        plt.figure(figsize=(15, 10))
+        plt.title("Control Flow Graph (CFG) Visualization", pad=20)
+        
+        # Use a larger figure and adjust subplot parameters for better visibility
+        plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
+        
+        # Enable interactive pan and zoom
+        plt.rcParams['toolbar'] = 'toolmanager'
+        
         for node, shape in zip(cfg.nodes(), node_shapes):
             nx.draw_networkx_nodes(cfg, pos, nodelist=[node], node_color=[node_colors[cfg.nodes[node]]], node_size=[node_sizes[cfg.nodes[node]]], node_shape=shape)
 
@@ -326,8 +357,16 @@ class DiagramGenerator:
             bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', boxstyle='round,pad=0.3')
         )
         
-        # Title for the plot
-        plt.title("Control Flow Graph (CFG) Visualization", pad=20)
+        # Set plot limits to show entire graph
+        x_values = [x for x, y in pos.values()]
+        y_values = [y for x, y in pos.values()]
+        x_margin = (max(x_values) - min(x_values)) * 0.1
+        y_margin = (max(y_values) - min(y_values)) * 0.1
+        plt.xlim(min(x_values) - x_margin, max(x_values) + x_margin)
+        plt.ylim(min(y_values) - y_margin, max(y_values) + y_margin)
+        
+        # Remove axis for cleaner look
+        plt.axis('off')
 
         return plt.gcf()
 
@@ -389,6 +428,17 @@ class DiagramGenerator:
             node_shapes.append(shape_map.get(node_type, 'o'))  # Default to circle
 
         # Draw the graph with different node shapes and colors
+        pos = nx.spring_layout(ddg, k=0.15, iterations=200)
+        plt.clf()  # Clear the current figure
+        plt.figure(figsize=(15, 10))
+        plt.title("Data Dependency Graph (DDG) Visualization", pad=20)
+        
+        # Use a larger figure and adjust subplot parameters for better visibility
+        plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
+        
+        # Enable interactive pan and zoom
+        plt.rcParams['toolbar'] = 'toolmanager'
+        
         for node, shape in zip(ddg.nodes(), node_shapes):
             nx.draw_networkx_nodes(ddg, pos, nodelist=[node], node_color=[node_colors[ddg.nodes[node]]], node_size=[node_sizes[ddg.nodes[node]]], node_shape=shape)
 
@@ -402,8 +452,17 @@ class DiagramGenerator:
             font_size=10, font_weight='bold', font_color='black',
             bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', boxstyle='round,pad=0.3')
         )
-        # Title for the plot
-        plt.title("Data Dependency Graph (DDG) Visualization", pad=20)
+        
+        # Set plot limits to show entire graph
+        x_values = [x for x, y in pos.values()]
+        y_values = [y for x, y in pos.values()]
+        x_margin = (max(x_values) - min(x_values)) * 0.1
+        y_margin = (max(y_values) - min(y_values)) * 0.1
+        plt.xlim(min(x_values) - x_margin, max(x_values) + x_margin)
+        plt.ylim(min(y_values) - y_margin, max(y_values) + y_margin)
+        
+        # Remove axis for cleaner look
+        plt.axis('off')
 
         return plt.gcf()
 
