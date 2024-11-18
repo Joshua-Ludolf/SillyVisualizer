@@ -12,19 +12,27 @@ class GraphVisualizer {
         this.nodeRadius = 20;
         this.zoom = null;
         this.nodeTypes = {
-            'Module': { color: '#2C3E50', description: 'Main code container' },
-            'ClassDef': { color: '#3498DB', description: 'Class definition' },
-            'ClassDeclaration': { color: '#3498DB', description: 'Java class' },
-            'FunctionDef': { color: '#2ECC71', description: 'Function definition' },
-            'MethodDeclaration': { color: '#2ECC71', description: 'Java method' },
-            'Name': { color: '#F39C12', description: 'Variable or identifier' },
-            'Attribute': { color: '#9B59B6', description: 'Object property' },
-            'Call': { color: '#16A085', description: 'Function call' },
-            'If': { color: '#E74C3C', description: 'If statement' },
-            'For': { color: '#E74C3C', description: 'For loop' },
-            'While': { color: '#E74C3C', description: 'While loop' },
-            'default': { color: '#95A5A6', description: 'Other element' }
+            'Module': { color: '#2C3E50', description: 'Module/File' },
+            'Class': { color: '#3498DB', description: 'Class Definition', types: ['ClassDef', 'ClassDeclaration'] },
+            'Function': { color: '#2ECC71', description: 'Function/Method', types: ['FunctionDef', 'MethodDeclaration'] },
+            'Name': { color: '#F39C12', description: 'Variable/Identifier' },
+            'Attribute': { color: '#9B59B6', description: 'Object Property' },
+            'Call': { color: '#16A085', description: 'Function Call' },
+            'Control': { color: '#E74C3C', description: 'Control Flow', types: ['If', 'For', 'While'] },
+            'default': { color: '#95A5A6', description: 'Other Element' }
         };
+
+        // Create a mapping for quick node type lookups
+        this.nodeTypeMapping = {};
+        Object.entries(this.nodeTypes).forEach(([key, value]) => {
+            if (value.types) {
+                value.types.forEach(type => {
+                    this.nodeTypeMapping[type] = key;
+                });
+            } else {
+                this.nodeTypeMapping[key] = key;
+            }
+        });
     }
 
     initialize() {
@@ -139,7 +147,7 @@ class GraphVisualizer {
             .style('margin-bottom', '8px')
             .text('Node Types');
 
-        // Add legend items
+        // Add legend items (only for main types, not the mapping)
         const items = legend.selectAll('.legend-item')
             .data(Object.entries(this.nodeTypes))
             .enter()
@@ -181,7 +189,10 @@ class GraphVisualizer {
         this.nodeElements = this.graphGroup.selectAll('.node')
             .data(this.nodes)
             .join('g')
-            .attr('class', d => `node node-${d.type}`)
+            .attr('class', d => {
+                const mappedType = this.nodeTypeMapping[d.type] || 'default';
+                return `node node-${mappedType}`;
+            })
             .call(this.drag());
 
         // Clear existing circles and labels
@@ -190,7 +201,10 @@ class GraphVisualizer {
         // Add circles to nodes
         this.nodeElements.append('circle')
             .attr('r', this.nodeRadius)
-            .attr('fill', d => this.nodeTypes[d.type]?.color || this.nodeTypes.default.color)
+            .attr('fill', d => {
+                const mappedType = this.nodeTypeMapping[d.type] || 'default';
+                return this.nodeTypes[mappedType]?.color || this.nodeTypes.default.color;
+            })
             .attr('stroke', '#fff')
             .attr('stroke-width', 1.5);
 
