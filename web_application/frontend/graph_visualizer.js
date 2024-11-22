@@ -11,6 +11,7 @@ class GraphVisualizer {
         this.height = 600;
         this.nodeRadius = 20;
         this.zoom = null;
+        this.tooltip = null;
         this.nodeTypes = {
             'Module': { color: '#2C3E50', description: 'Module/File' },
             'Class': { color: '#3498DB', description: 'Class Definition', types: ['ClassDef', 'ClassDeclaration'] },
@@ -42,6 +43,46 @@ class GraphVisualizer {
             .attr('width', '100%')
             .attr('height', '100%')
             .attr('viewBox', [-this.width / 2, -this.height / 2, this.width, this.height]);
+
+        // Create defs for gradients
+        const defs = this.svg.append('defs');
+
+        // Create gradients for each node type
+        Object.entries(this.nodeTypes).forEach(([key, value]) => {
+            const gradient = defs.append('radialGradient')
+                .attr('id', `gradient-${key}`)
+                .attr('cx', '50%')
+                .attr('cy', '50%')
+                .attr('r', '50%')
+                .attr('fx', '50%')
+                .attr('fy', '50%');
+
+            const baseColor = d3.color(value.color);
+            const lighterColor = baseColor.brighter(0.5);
+            const darkerColor = baseColor.darker(0.5);
+
+            gradient.append('stop')
+                .attr('offset', '0%')
+                .attr('stop-color', lighterColor.toString());
+
+            gradient.append('stop')
+                .attr('offset', '100%')
+                .attr('stop-color', darkerColor.toString());
+        });
+
+        // Create tooltip div
+        this.tooltip = d3.select(`#${this.containerId}`)
+            .append('div')
+            .attr('class', 'node-tooltip')
+            .style('position', 'absolute')
+            .style('visibility', 'hidden')
+            .style('background-color', 'rgba(0, 0, 0, 0.8)')
+            .style('color', 'white')
+            .style('padding', '8px')
+            .style('border-radius', '4px')
+            .style('font-size', '12px')
+            .style('pointer-events', 'none')
+            .style('z-index', '1000');
 
         // Create a group for the graph content
         this.graphGroup = this.svg.append('g')
@@ -193,7 +234,56 @@ class GraphVisualizer {
                 const mappedType = this.nodeTypeMapping[d.type] || 'default';
                 return `node node-${mappedType}`;
             })
-            .call(this.drag());
+            .call(this.drag())
+            .on('mouseover', (event, d) => {
+                const mappedType = this.nodeTypeMapping[d.type] || 'default';
+                const nodeType = this.nodeTypes[mappedType];
+                
+                // Get full path/name
+                const fullName = d.value || d.label || '';
+                
+                // Create tooltip content
+                const details = [
+                    `Full Name: ${fullName}`,
+                    `Type: ${nodeType.description}`,
+                    d.lineno ? `Line: ${d.lineno}` : null,
+                    d.details ? `${d.details}` : null
+                ].filter(Boolean).join('\n');
+
+                // Position tooltip relative to the container
+                const containerRect = document.getElementById(this.containerId).getBoundingClientRect();
+                const xOffset = event.clientX - containerRect.left + 10;
+                const yOffset = event.clientY - containerRect.top - 10;
+
+                this.tooltip
+                    .style('visibility', 'visible')
+                    .style('left', xOffset + 'px')
+                    .style('top', yOffset + 'px')
+                    .text(details);
+
+                // Highlight the node
+                d3.select(event.currentTarget).select('circle')
+                    .style('stroke', '#ffd700')
+                    .style('stroke-width', '3px');
+            })
+            .on('mousemove', (event) => {
+                // Update tooltip position relative to the container
+                const containerRect = document.getElementById(this.containerId).getBoundingClientRect();
+                const xOffset = event.clientX - containerRect.left + 10;
+                const yOffset = event.clientY - containerRect.top - 10;
+
+                this.tooltip
+                    .style('left', xOffset + 'px')
+                    .style('top', yOffset + 'px');
+            })
+            .on('mouseout', (event) => {
+                this.tooltip.style('visibility', 'hidden');
+                
+                // Remove highlight
+                d3.select(event.currentTarget).select('circle')
+                    .style('stroke', '#fff')
+                    .style('stroke-width', '1.5px');
+            });
 
         // Clear existing circles and labels
         this.nodeElements.selectAll('*').remove();
@@ -203,27 +293,27 @@ class GraphVisualizer {
             .attr('r', this.nodeRadius)
             .attr('fill', d => {
                 const mappedType = this.nodeTypeMapping[d.type] || 'default';
-                return this.nodeTypes[mappedType]?.color || this.nodeTypes.default.color;
+                return `url(#gradient-${mappedType})`;
             })
             .attr('stroke', '#fff')
             .attr('stroke-width', 1.5);
 
         // Add labels to nodes
         this.nodeElements.append('text')
-            .text(d => d.value || d.label)
+            .text(d => {
+                const mappedType = this.nodeTypeMapping[d.type] || 'default';
+                // Only show text for Class and Function nodes
+                if (mappedType === 'Class' || mappedType === 'Function') {
+                    const name = d.value || d.label || '';
+                    return name.split('/').pop(); // Show only the last part of the name
+                }
+                return ''; // Empty text for other nodes
+            })
             .attr('text-anchor', 'middle')
             .attr('dy', '.35em')
-            .attr('fill', '#fff')
+            .attr('fill', '#000')
             .style('font-size', '10px')
-            .style('pointer-events', 'none')
-            .each(function(d) {
-                // Wrap text if too long
-                let text = d3.select(this);
-                let words = (d.value || d.label).split(/\s+/);
-                if (words.length > 2) {
-                    text.text(words.slice(0, 2).join(' ') + '...');
-                }
-            });
+            .style('pointer-events', 'none');
 
         // Update simulation
         this.simulation.nodes(this.nodes);
