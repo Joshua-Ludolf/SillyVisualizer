@@ -279,6 +279,223 @@ class DiagramGenerator:
         return color_map.get(node_type, color_map['default'])
 
     @staticmethod
+    def generate_ast(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
+        """Generate AST with hierarchical layout."""
+        try:
+            # Create hierarchical layout
+            pos = nx.spring_layout(G, k=2)
+            
+            # Adjust y-coordinates based on node depth
+            root_nodes = [n for n in G.nodes() if G.in_degree(n) == 0]
+            for root in root_nodes:
+                bfs_edges = list(nx.bfs_edges(G, root))
+                levels = {root: 0}
+                for u, v in bfs_edges:
+                    levels[v] = levels[u] + 1
+                
+                # Normalize depths
+                max_depth = max(levels.values()) if levels else 0
+                if max_depth > 0:
+                    for node in levels:
+                        if node in pos:
+                            pos[node][1] = 1 - (levels[node] / max_depth)
+
+            plt.figure(figsize=(12, 8), facecolor='white')
+            
+            # Draw edges as straight lines
+            nx.draw_networkx_edges(G, pos, edge_color='gray', 
+                                 arrows=True, arrowsize=15,
+                                 connectionstyle='arc3,rad=0')
+
+            # Draw nodes with type-based colors and sizes
+            node_colors = []
+            node_sizes = []
+            for node in G.nodes():
+                node_type = G.nodes[node].get('type', 'default')
+                if node_type in ['Module', 'ClassDef', 'ClassDeclaration']:
+                    node_sizes.append(2000)
+                elif node_type in ['FunctionDef', 'MethodDeclaration']:
+                    node_sizes.append(1500)
+                else:
+                    node_sizes.append(1000)
+                node_colors.append(DiagramGenerator._get_node_color(node_type))
+
+            nx.draw_networkx_nodes(G, pos, node_color=node_colors, 
+                                 node_size=node_sizes, alpha=0.9)
+
+            # Add labels
+            labels = {node: G.nodes[node].get('value', '') for node in G.nodes()}
+            nx.draw_networkx_labels(G, pos, labels, font_size=8)
+
+            plt.axis('off')
+            
+            # Save to buffer
+            buffer = io.BytesIO()
+            plt.savefig(buffer, format='svg', bbox_inches='tight', 
+                       dpi=150, pad_inches=0.5, facecolor='white')
+            plt.close()
+            
+            svg_data = buffer.getvalue().decode('utf-8')
+            return base64.b64encode(svg_data.encode('utf-8')).decode('utf-8')
+        
+        except Exception as e:
+            print(f"Error generating AST visualization: {str(e)}")
+            return ""
+
+    @staticmethod
+    def generate_cfg(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
+        """Generate Control Flow Graph with traditional style."""
+        try:
+            # Use layout better suited for control flow
+            pos = nx.kamada_kawai_layout(G)
+            
+            plt.figure(figsize=(12, 8), facecolor='white')
+            
+            # Draw different types of edges
+            edge_styles = {'condition': ('red', '--'), 
+                         'loop': ('blue', ':'),
+                         'normal': ('black', '-')}
+            
+            for (u, v) in G.edges():
+                edge_type = G.edges[u, v].get('type', '').lower()
+                if 'condition' in edge_type:
+                    color, style = edge_styles['condition']
+                elif 'loop' in edge_type:
+                    color, style = edge_styles['loop']
+                else:
+                    color, style = edge_styles['normal']
+                
+                nx.draw_networkx_edges(G, pos, edgelist=[(u, v)],
+                                     edge_color=color,
+                                     style=style,
+                                     arrows=True,
+                                     arrowsize=20,
+                                     arrowstyle='->',
+                                     connectionstyle='arc3,rad=0.2')
+
+            # Draw nodes as rectangles with light background
+            node_shapes = []
+            node_colors = []
+            node_sizes = []
+            
+            for node in G.nodes():
+                node_type = G.nodes[node].get('type', '').lower()
+                if 'condition' in node_type:
+                    node_shapes.append('d')  # diamond for conditions
+                    node_colors.append('lightblue')
+                    node_sizes.append(2000)
+                elif 'loop' in node_type:
+                    node_shapes.append('s')  # square for loops
+                    node_colors.append('lightgreen')
+                    node_sizes.append(1800)
+                else:
+                    node_shapes.append('o')  # circle for other nodes
+                    node_colors.append('white')
+                    node_sizes.append(1500)
+
+            # Draw nodes with different shapes
+            for shape in set(node_shapes):
+                node_list = [node for i, node in enumerate(G.nodes()) if node_shapes[i] == shape]
+                if node_list:
+                    nx.draw_networkx_nodes(G, pos,
+                                         nodelist=node_list,
+                                         node_color=[c for i, c in enumerate(node_colors) if node_shapes[i] == shape],
+                                         node_size=[s for i, s in enumerate(node_sizes) if node_shapes[i] == shape],
+                                         node_shape=shape,
+                                         edgecolors='black')
+
+            # Add labels
+            labels = {node: G.nodes[node].get('value', '') for node in G.nodes()}
+            nx.draw_networkx_labels(G, pos, labels, font_size=8)
+
+            plt.axis('off')
+            
+            # Save to buffer
+            buffer = io.BytesIO()
+            plt.savefig(buffer, format='svg', bbox_inches='tight', 
+                       dpi=150, pad_inches=0.5, facecolor='white')
+            plt.close()
+            
+            svg_data = buffer.getvalue().decode('utf-8')
+            return base64.b64encode(svg_data.encode('utf-8')).decode('utf-8')
+        
+        except Exception as e:
+            print(f"Error generating CFG visualization: {str(e)}")
+            return ""
+
+    @staticmethod
+    def generate_ddg(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
+        """Generate Data Dependency Graph with emphasis on data flow."""
+        try:
+            # Use circular layout for data dependency visualization
+            pos = nx.circular_layout(G)
+            
+            plt.figure(figsize=(12, 8), facecolor='white')
+            
+            # Draw edges with dependency labels
+            edge_labels = {}
+            for (u, v) in G.edges():
+                dep_type = G.edges[u, v].get('dependency_type', '')
+                edge_labels[(u, v)] = dep_type
+                
+                # Draw curved arrows for dependencies
+                nx.draw_networkx_edges(G, pos, edgelist=[(u, v)],
+                                     edge_color='#2980b9',
+                                     arrows=True,
+                                     arrowsize=20,
+                                     arrowstyle='->',
+                                     connectionstyle='arc3,rad=0.3',
+                                     width=2)
+            
+            # Draw edge labels if they exist
+            if edge_labels:
+                nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=6)
+            
+            # Draw nodes with different styles based on type
+            var_nodes = []
+            op_nodes = []
+            for node in G.nodes():
+                if G.nodes[node].get('type') == 'variable':
+                    var_nodes.append(node)
+                else:
+                    op_nodes.append(node)
+            
+            # Draw variable nodes
+            if var_nodes:
+                nx.draw_networkx_nodes(G, pos,
+                                     nodelist=var_nodes,
+                                     node_color='#e74c3c',
+                                     node_size=2000,
+                                     node_shape='o')
+            
+            # Draw operation nodes
+            if op_nodes:
+                nx.draw_networkx_nodes(G, pos,
+                                     nodelist=op_nodes,
+                                     node_color='#2ecc71',
+                                     node_size=1500,
+                                     node_shape='s')
+            
+            # Add labels
+            labels = {node: G.nodes[node].get('value', '') for node in G.nodes()}
+            nx.draw_networkx_labels(G, pos, labels, font_size=8)
+            
+            plt.axis('off')
+            
+            # Save to buffer
+            buffer = io.BytesIO()
+            plt.savefig(buffer, format='svg', bbox_inches='tight', 
+                       dpi=150, pad_inches=0.5, facecolor='white')
+            plt.close()
+            
+            svg_data = buffer.getvalue().decode('utf-8')
+            return base64.b64encode(svg_data.encode('utf-8')).decode('utf-8')
+        
+        except Exception as e:
+            print(f"Error generating DDG visualization: {str(e)}")
+            return ""
+
+    @staticmethod
     def _generate_graph_image(G: nx.DiGraph) -> str:
         """
         Convert networkx graph to base64 encoded image with improved layout
@@ -497,48 +714,6 @@ class DiagramGenerator:
         svg_base64 = base64.b64encode(svg_data.encode('utf-8')).decode('utf-8')
         
         return svg_base64
-
-    @staticmethod
-    def generate_ast(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
-        """
-        Generate an interactive graph representation of the AST.
-
-        Args:
-            G (nx.DiGraph): The graph to visualize
-            metadata (Dict[str, Any]): Metadata about the graph
-
-        Returns:
-            str: Base64 encoded SVG of the graph
-        """
-        return DiagramGenerator._generate_graph_image(G)
-
-    @staticmethod
-    def generate_cfg(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
-        """
-        Generate a Control Flow Graph (CFG) visualization.
-
-        Args:
-            G (nx.DiGraph): The control flow graph
-            metadata (Dict[str, Any]): Metadata about the graph
-
-        Returns:
-            str: Base64 encoded SVG of the graph
-        """
-        return DiagramGenerator._generate_graph_image(G)
-
-    @staticmethod
-    def generate_ddg(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
-        """
-        Generate a Data Dependency Graph (DDG) visualization.
-
-        Args:
-            G (nx.DiGraph): The data dependency graph
-            metadata (Dict[str, Any]): Metadata about the graph
-
-        Returns:
-            str: Base64 encoded SVG of the graph
-        """
-        return DiagramGenerator._generate_graph_image(G)
 
 def generate_visualization(code: str, language: str, diagram_type: str) -> Tuple[str, str, Dict[str, Any]]:
     """
