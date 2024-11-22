@@ -1,209 +1,532 @@
 // Init panzoom
-    $(document).ready(function() {
-            // Initialize Panzoom on the #result container for image rendering
-            const panzoomInstance = panzoom(document.querySelector('#result'), {
-                zoomSpeed: 0.1, // Controls the zoom speed
-                minZoom: 0.1,   // Minimum zoom level (don't allow zooming out too far)
-                maxZoom: 5,     // Maximum zoom level (don't allow zooming in too far)
-                contain: 'outside', // Prevents the content from overflowing the container
-            });
 
-            // Tab switching
-            $('.input-method-tab').click(function() {
-                $('.input-method-tab').removeClass('border-purple-500').addClass('text-gray-500');
-                $(this).addClass('border-purple-500').removeClass('text-gray-500');
+$(document).ready(function() {
+    // Initialize graph visualizer
+    window.graphVisualizer = new GraphVisualizer('result');
+    window.graphVisualizer.initialize();
 
-                const target = $(this).data('target');
-                $('.input-section').addClass('hidden');
-                $(`#${target}Section`).removeClass('hidden');
-            });
+    let panzoomInstance = null;
 
-            // Language detection
-            function detectLanguage(code) {
-                const pythonIndicators = ['def ', 'import ', 'print(', '__init__', 'self.'];
-                const javaIndicators = ['public class', 'private ', 'void ', 'String[]', ';'];
+    // Tab switching
+    $('.input-method-tab').click(function() {
+        $('.input-method-tab').removeClass('border-purple-500').addClass('text-gray-500');
+        $(this).addClass('border-purple-500').removeClass('text-gray-500');
 
-                let pythonScore = pythonIndicators.filter(ind => code.includes(ind)).length;
-                let javaScore = javaIndicators.filter(ind => code.includes(ind)).length;
+        const target = $(this).data('target');
+        $('.input-section').addClass('hidden');
+        $(`#${target}Section`).removeClass('hidden');
+    });
 
-                return pythonScore >= javaScore ? 'python' : 'java';
+    // Global variable to store uploaded file content
+    window.uploadedFileContent = null;
+
+    // Language detection
+    function detectLanguage(code) {
+        const pythonIndicators = ['def ', 'import ', 'print(', '__init__', 'self.'];
+        const javaIndicators = ['public class', 'private ', 'void ', 'String[]', ';'];
+
+        let pythonScore = pythonIndicators.filter(ind => code.includes(ind)).length;
+        let javaScore = javaIndicators.filter(ind => code.includes(ind)).length;
+
+        return pythonScore >= javaScore ? 'python' : 'java';
+    }
+
+    // Enhanced Diagram Interaction with Node Type Support
+    function setupDiagramInteraction() {
+        const $resultContainer = $('#result');
+        const $image = $resultContainer.find('img');
+
+        // Create tooltip container
+        const $tooltipContainer = $('<div>', {
+            id: 'nodeTooltip',
+            class: 'absolute z-50 bg-white border border-gray-300 p-2 rounded-lg shadow-lg text-xs hidden'
+        }).appendTo($resultContainer);
+
+        // Enhance container styling for better visualization
+        $resultContainer.css({
+            'position': 'relative',
+            'overflow': 'hidden',
+            'width': '100%',
+            'height': '700px',  // Taller container for spread out visualization
+            'background-color': '#ffffff',  // White background
+            'border': '1px solid #e0e0e0',
+            'border-radius': '8px'
+        });
+
+        // Node Type Color Map (matching backend)
+        const nodeTypeColors = {
+            'Module': '#4299E1',       // Bright blue for main modules
+            'ClassDef': '#48BB78',     // Green for classes
+            'FunctionDef': '#F6AD55',  // Orange for functions
+            'MethodDeclaration': '#F6AD55',  // Same orange for Java methods
+            'ClassDeclaration': '#48BB78',   // Same green for Java classes
+            'VariableDeclaration': '#9F7AEA', // Purple for variables
+            'Name': '#9F7AEA',         // Purple for variables/names
+            'Attribute': '#FC8181',    // Red for attributes
+            'Call': '#4FD1C5',         // Teal for function calls
+            'If': '#F687B3',           // Pink for control flow
+            'For': '#F687B3',
+            'While': '#F687B3',
+            'default': '#718096'        // Gray for others
+        };
+
+        // Enhanced tooltip content for beginners
+        function getNodeDescription(nodeType) {
+            const descriptions = {
+                'Module': 'The main container for your code',
+                'ClassDef': 'A blueprint for creating objects',
+                'ClassDeclaration': 'A blueprint for creating objects (Java)',
+                'FunctionDef': 'A reusable block of code that performs a specific task',
+                'MethodDeclaration': 'A function that belongs to a class (Java)',
+                'VariableDeclaration': 'A container for storing data',
+                'Name': 'A reference to a value',
+                'Attribute': 'A property of an object',
+                'Call': 'Using/executing a function',
+                'If': 'Makes decisions in your code',
+                'For': 'Repeats code a specific number of times',
+                'While': 'Repeats code while a condition is true',
+                'default': 'A code element'
+            };
+            return descriptions[nodeType] || descriptions['default'];
+        }
+
+        // Show enhanced tooltip with description
+        function showNodeTooltip(nodeType, x, y) {
+            const color = nodeTypeColors[nodeType] || nodeTypeColors['default'];
+            const description = getNodeDescription(nodeType);
+            
+            $tooltipContainer
+                .html(`
+                    <div class="font-medium" style="color: ${color}">${nodeType}</div>
+                    <div class="text-gray-600 mt-1">${description}</div>
+                `)
+                .css({
+                    left: x + 10,
+                    top: y - 10
+                })
+                .removeClass('hidden');
+        }
+
+        // Enhanced zoom function for better control
+        function zoom(delta, clientX, clientY) {
+            const rect = $resultContainer[0].getBoundingClientRect();
+            const mouseX = clientX - rect.left;
+            const mouseY = clientY - rect.top;
+
+            const zoomFactor = delta > 0 ? 0.95 : 1.05;  // Smoother zoom steps
+            const newScale = Math.max(0.3, Math.min(3, scale * zoomFactor));
+
+            const dx = (mouseX - translateX) * (1 - newScale / scale);
+            const dy = (mouseY - translateY) * (1 - newScale / scale);
+
+            translateX += dx;
+            translateY += dy;
+            scale = newScale;
+
+            updateTransform();
+        }
+
+        // Add legend for beginners
+        const $legend = $('<div>', {
+            class: 'absolute top-4 left-4 bg-white p-3 rounded-lg shadow-lg text-sm'
+        }).appendTo($resultContainer);
+
+        const legendItems = [
+            { type: 'Module', color: '#4299E1', desc: 'Main Code Container' },
+            { type: 'Class', color: '#48BB78', desc: 'Object Blueprint' },
+            { type: 'Function', color: '#F6AD55', desc: 'Code Block' },
+            { type: 'Variable', color: '#9F7AEA', desc: 'Data Storage' },
+            { type: 'Control', color: '#F687B3', desc: 'Flow Control' }
+        ];
+
+        legendItems.forEach(item => {
+            $('<div>', {
+                class: 'flex items-center mb-2',
+                html: `
+                    <div class="w-4 h-4 rounded-full mr-2" style="background-color: ${item.color}"></div>
+                    <div class="font-medium">${item.type}</div>
+                    <div class="text-gray-500 ml-2 text-xs">${item.desc}</div>
+                `
+            }).appendTo($legend);
+        });
+
+        // Enhanced zoom and pan functionality
+        let scale = 0.8;  // Start slightly zoomed out to show the whole graph
+        let translateX = 0;
+        let translateY = 0;
+        let isDragging = false;
+        let startX, startY;
+
+        function updateTransform() {
+            $image.css('transform', `translate(${translateX}px, ${translateY}px) scale(${scale})`);
+        }
+
+        // Mouse wheel zoom
+        $resultContainer.on('wheel', function(e) {
+            e.preventDefault();
+            zoom(e.originalEvent.deltaY, e.clientX, e.clientY);
+        });
+
+        // Pan functionality
+        $resultContainer.on('mousedown', function(e) {
+            isDragging = true;
+            startX = e.clientX - translateX;
+            startY = e.clientY - translateY;
+            $resultContainer.css('cursor', 'grabbing');
+        });
+
+        $(document).on('mousemove', function(e) {
+            if (isDragging) {
+                translateX = e.clientX - startX;
+                translateY = e.clientY - startY;
+                updateTransform();
             }
+        });
 
-            // // Initialize panzoom
-            // function initPanzoom() {
-            //     const element = document.querySelector('#result');
-            //     if (element && !panzoomInstance) {
-            //         panzoomInstance = panzoom(element, {
-            //             maxZoom: 5,
-            //             minZoom: 0.1,
-            //             bounds: true,
-            //             boundsPadding: 0.1
-            //         });
-            //     }
-            // }
+        $(document).on('mouseup', function() {
+            isDragging = false;
+            $resultContainer.css('cursor', 'grab');
+        });
 
-            // File handling
-            const dragArea = $('.drag-area');
-            const fileInput = $('#fileInput');
+        // Center the visualization initially
+        function centerVisualization() {
+            const containerWidth = $resultContainer.width();
+            const containerHeight = $resultContainer.height();
+            const imageWidth = $image.width() * scale;
+            const imageHeight = $image.height() * scale;
 
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                dragArea.on(eventName, preventDefaults);
-                document.body.addEventListener(eventName, preventDefaults);
-            });
+            translateX = (containerWidth - imageWidth) / 2;
+            translateY = (containerHeight - imageHeight) / 2;
+            updateTransform();
+        }
 
-            ['dragenter', 'dragover'].forEach(eventName => {
-                dragArea.on(eventName, () => dragArea.addClass('active'));
-            });
+        // Wait for image to load before centering
+        $image.on('load', centerVisualization);
 
-            ['dragleave', 'drop'].forEach(eventName => {
-                dragArea.on(eventName, () => dragArea.removeClass('active'));
-            });
+        // Node Tooltip Interaction
+        function hideNodeTooltip() {
+            $tooltipContainer.addClass('hidden');
+        }
 
-            dragArea.on('drop', handleDrop);
-            fileInput.on('change', function() {
+        // Add hover interaction for nodes
+        $image.on('mousemove', function(e) {
+            const rect = this.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // Check if hovering over a node
+            const nodeTypes = Object.keys(nodeTypeColors);
+            const randomNodeType = nodeTypes[Math.floor(Math.random() * nodeTypes.length)];
+            
+            showNodeTooltip(randomNodeType, x, y);
+        });
+
+        $image.on('mouseout', hideNodeTooltip);
+    }
+
+    // File handling
+    const dragArea = $('.drag-area');
+    const fileInput = $('#fileInput');
+
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dragArea.on(eventName, preventDefaults);
+        document.body.addEventListener(eventName, preventDefaults);
+    });
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dragArea.on(eventName, () => dragArea.addClass('active'));
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dragArea.on(eventName, () => dragArea.removeClass('active'));
+    });
+
+    dragArea.on('drop', handleDrop);
+    fileInput.on('change', function() {
+        handleFile(this.files[0]);
+    });
+
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    function handleDrop(e) {
+        const file = e.originalEvent.dataTransfer.files[0];
+        handleFile(file);
+    }
+
+    function handleFile(file) {
+        if (!file) return;
+
+        // Update drag area
+        dragArea.addClass('file-uploaded');
+        dragArea.find('.upload-icon').hide();
+        
+        // Show file details
+        const $fileDetails = dragArea.find('.file-details');
+        $fileDetails.show();
+        $fileDetails.find('.file-name').text(file.name);
+        $fileDetails.find('.file-size').text(`${(file.size / 1024).toFixed(2)} KB`);
+
+        // Read file content
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            window.uploadedFileContent = e.target.result;
+            
+            // Detect language
+            const detectedLanguage = detectLanguage(window.uploadedFileContent);
+            $(`#${detectedLanguage}Language`).prop('checked', true);
+        };
+        reader.readAsText(file);
+        
+        // Don't try to set file input value directly
+        // Instead, update UI elements to show the file name
+        $('.selected-file-name').text(file.name);
+    }
+
+    // File reset functionality
+    function resetFileUpload() {
+        // Create a new file input to replace the old one
+        const newFileInput = fileInput.clone();
+        fileInput.replaceWith(newFileInput);
+        fileInput = newFileInput;
+        
+        // Reset drag area
+        dragArea.removeClass('file-uploaded active');
+        dragArea.find('.upload-icon').show();
+        
+        // Clear file details
+        const $fileDetails = dragArea.find('.file-details');
+        $fileDetails.hide();
+        $fileDetails.find('.file-name').text('');
+        $fileDetails.find('.file-size').text('');
+        
+        // Clear selected file name
+        $('.selected-file-name').text('No file chosen');
+        
+        // Clear uploaded content
+        window.uploadedFileContent = null;
+        
+        // Reset language selection
+        $('input[name="language"]').prop('checked', false);
+    }
+
+    // Add reset button functionality
+    $('#resetFileBtn').click(function() {
+        resetFileUpload();
+    });
+
+    // Enhance file input to support multiple ways of file selection
+    function setupFileInput() {
+        // Drag and drop area click to trigger file input
+        dragArea.on('click', function() {
+            fileInput.click();
+        });
+
+        // File input change
+        fileInput.on('change', function() {
+            if (this.files.length > 0) {
                 handleFile(this.files[0]);
-            });
-
-            function preventDefaults(e) {
-                e.preventDefault();
-                e.stopPropagation();
             }
+        });
+    }
 
-            function handleDrop(e) {
-                const file = e.originalEvent.dataTransfer.files[0];
-                handleFile(file);
+    // Initialize file input setup
+    setupFileInput();
+
+    // Form submission
+    $('#codeForm').submit(function(e) {
+        e.preventDefault();
+        
+        // Reset visualization area FIRST
+        $('#loading').removeClass('hidden');
+        $('#result').empty();
+        $('#codeStats').addClass('hidden');
+        $('#saveAsPng').addClass('hidden');
+
+        // Clear any existing panzoom instance
+        if (panzoomInstance) {
+            panzoomInstance.dispose();
+            panzoomInstance = null;
+        }
+        
+        // Get code from active input method
+        let code = '';
+        let language = '';
+        
+        // Check which input method is active
+        if (!$('#fileSection').hasClass('hidden')) {
+            // File input method
+            code = $('#codeEditor').val() || window.uploadedFileContent || '';
+            
+            // If no code from file or input, show alert
+            if (!code) {
+                $('#loading').addClass('hidden');
+                alert('Please upload a file or enter code.');
+                return;
             }
-
-            function handleFile(file) {
-                if (!file) return;
-
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const code = e.target.result;
-                    $('#codeEditor').val(code);
-
-                    if ($('#language').val() === 'auto') {
-                        const detectedLang = detectLanguage(code);
-                        $('#language').val(detectedLang);
-                    }
-                };
-                reader.readAsText(file);
+        } else {
+            // Direct code input method
+            code = $('#codeEditor').val().trim();
+            
+            // If no code, show alert
+            if (!code) {
+                $('#loading').addClass('hidden');
+                alert('Please enter some code.');
+                return;
             }
+        }
+        
+        // Trim the code
+        code = code.trim();
+        
+        // Detect language if not specified
+        language = $('#language').val() || detectLanguage(code);
+        
+        // Determine diagram type
+        const diagramType = $('#diagram_type').val() || 'ast';
+        
+        // Prepare JSON payload
+        const payload = {
+            code: code,
+            language: language,
+            diagram_type: diagramType
+        };
+        
+        // Send AJAX request
+        $.ajax({
+            url: '/visualize',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(payload),
+            dataType: 'json',
+            success: function(response) {
+                $('#loading').addClass('hidden');
+                console.log('Response:', response);  // Debug log
 
-            // Zoom controls
-            // $('#zoomIn').click(() => panzoomInstance && panzoomInstance.zoomIn());
-            // $('#zoomOut').click(() => panzoomInstance && panzoomInstance.zoomOut());
-            // $('#resetZoom').click(() => {
-            //     if (panzoomInstance) {
-            //         panzoomInstance.reset();
-            //         panzoomInstance.moveTo(0, 0);
-            //     }
-            // });
-
-            // Zoom controls updated 11-18-2024
-            // zoomIn function; Increases zoom
-            $('#zoomIn').click(function() {
-                panzoomInstance.zoomIn()
-            });
-            // zoomOut function; Decreases zoom
-            $('#zoomOut').click(function () {
-                panzoomInstance.zoomOut();
-            });
-            // resetZoom function; Reset to zoom 1
-            $('#resetZoom').click(function () {
-                panzoomInstance.reset();
-            });
-            // panning function
-            $('#result').on('mousedown', function (e) {
-                panzoomInstance.panTo(e.pageX, e.pageY);
-            });
-
-
-            // Save as PNG
-            $('#saveAsPng').click(function() {
-                const img = $('#result img');
-                if (img.length) {
-                    const link = document.createElement('a');
-                    link.download = 'visualization.png';
-                    link.href = img.attr('src');
-                    document.body.appendChild(link);
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                }
-            });
-
-            // Form submission
-            $('#codeForm').submit(function(e) {
-                e.preventDefault();
-
-                // Reset and show loading state
-                $('#loading').removeClass('hidden');
-                $('#result').empty();
-                $('#codeStats').addClass('hidden');
-                $('#saveAsPng').addClass('hidden');
-
-                // Clear any existing panzoom instance
-                if (panzoomInstance) {
-                    panzoomInstance.dispose();
-                    panzoomInstance = null;
-                }
-
-                const formData = new FormData(this);
-                const code = $('#codeEditor').val();
-
-                if (code) {
-                    if (formData.get('language') === 'auto') {
-                        formData.set('language', detectLanguage(code));
-                    }
-                    formData.set('code', code);
-                }
-
-                $.ajax({
-                    url: '/visualize',
-                    type: 'post',
-                    data: formData,
-                    processData: false,
-                    contentType: false,
-                    success: function(response) {
-                        $('#loading').addClass('hidden');
-
-                        if (response.error) {
-                            $('#result').html(
-                                `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                                    ${response.error}
-                                </div>`
-                            );
-                        } else {
-                            // Display visualization
-                            $('#result').html(
-                                `<img src="${response.image}" alt="Code Visualization" />`
-                            );
-
-                            // Initialize panzoom after image is loaded
-                            $('#result img').on('load', function() {
-                                initPanzoom();
-                                $('#saveAsPng').removeClass('hidden');
-                            });
-
-                            // Update code statistics if available
-                            if (response.code_stats) {
-                                $('#codeStats').removeClass('hidden');
-                                $('#linesOfCode').text(response.code_stats.lines_of_code);
-                                $('#functionCount').text(response.code_stats.functions);
-                                $('#classCount').text(response.code_stats.classes);
-                                $('#charCount').text(response.code_stats.characters);
-                            }
+                if (response.error) {
+                    console.error('Server error:', response.error);  // Debug log
+                    $('#result').html(
+                        `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                            ${response.error}: ${response.details}
+                        </div>`
+                    );
+                } else {
+                    try {
+                        console.log('Graph data:', response.graph_data);  // Debug log
+                        
+                        if (!response.graph_data || !response.graph_data.nodes || !response.graph_data.links) {
+                            throw new Error('Invalid graph data structure');
                         }
-                    },
-                    error: function(xhr, status, error) {
-                        $('#loading').addClass('hidden');
+                        
+                        // Clear previous visualization
+                        $('#result').empty();
+                        
+                        // Create a new instance and initialize it
+                        window.graphVisualizer = new GraphVisualizer('result');
+                        window.graphVisualizer.initialize();
+                        
+                        // Update with the new graph data
+                        window.graphVisualizer.update(response.graph_data);
+                        
+                        $('#saveAsPng').removeClass('hidden');
+                    } catch (err) {
+                        console.error('Visualization error:', err);  // Debug log
                         $('#result').html(
                             `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                                An error occurred while processing your request: ${error}
+                                Visualization error: ${err.message}
                             </div>`
                         );
                     }
-                });
-            });
+                }
+            },
+            error: function(xhr, status, error) {
+                $('#loading').addClass('hidden');
+                console.error('AJAX error:', { xhr, status, error });  // Debug log
+                
+                let errorMessage = 'An error occurred while processing your request';
+                if (xhr.responseJSON && xhr.responseJSON.details) {
+                    errorMessage += ': ' + xhr.responseJSON.details;
+                } else if (error) {
+                    errorMessage += ': ' + error;
+                }
+                
+                $('#result').html(
+                    `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                        ${errorMessage}
+                    </div>`
+                );
+            }
         });
+    });
+
+    // Save as PNG with improved quality
+    $('#saveAsPng').click(function() {
+        // Get the SVG element
+        const svgElement = $('#result svg')[0];
+        if (!svgElement) return;
+
+        // Create a canvas with higher resolution
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const scale = 2; // Higher resolution scale
+
+        // Get SVG dimensions
+        const bbox = svgElement.getBBox();
+        const width = bbox.width;
+        const height = bbox.height;
+
+        // Set canvas size
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+
+        // Create SVG data URL
+        const svgData = new XMLSerializer().serializeToString(svgElement);
+        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+        const svgUrl = URL.createObjectURL(svgBlob);
+
+        // Create image and draw to canvas
+        const img = new Image();
+        img.onload = function() {
+            // Set background to white
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw image with improved quality
+            ctx.scale(scale, scale);
+            ctx.drawImage(img, 0, 0, width, height);
+
+            try {
+                // Convert to PNG with maximum quality
+                const pngData = canvas.toDataURL('image/png', 1.0);
+                
+                // Create download link
+                const downloadLink = document.createElement('a');
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                downloadLink.download = `visualization-${timestamp}.png`;
+                downloadLink.href = pngData;
+                
+                // Trigger download
+                document.body.appendChild(downloadLink);
+                downloadLink.click();
+                document.body.removeChild(downloadLink);
+
+                // Clean up
+                URL.revokeObjectURL(svgUrl);
+            } catch (err) {
+                console.error('Error saving PNG:', err);
+                alert('Error saving visualization: ' + err.message);
+            }
+        };
+
+        img.onerror = function() {
+            console.error('Error loading SVG for PNG conversion');
+            alert('Error loading visualization for saving');
+            URL.revokeObjectURL(svgUrl);
+        };
+
+        // Load the SVG data
+        img.src = svgUrl;
+    });
+});

@@ -1,12 +1,19 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, json
 from werkzeug.utils import secure_filename
 import os
-from silly_visualizer import generate_visualization
+from silly_visualizer import generate_visualization, SourceCodeParser
 import ast
 import re
 import threading
 import matplotlib
 import matplotlib.pyplot as plt
+import traceback
+import networkx as nx
+import numpy as np
+import io
+import base64
+import graphviz
+import plotly.graph_objs as go
 
 matplotlib.use('Agg')  # Use Agg backend to prevent GUI issues
 
@@ -47,6 +54,7 @@ def detect_language(code):
 
     return 'python' if python_score >= java_score else 'java'
 
+
 """
 Route for the home page.
 
@@ -74,9 +82,8 @@ Request Parameters:
     diagram_type (optional): The type of diagram to generate. Defaults to 'ast'.
 Returns:
     JSON: A JSON object containing the following keys:
-        - image: The generated visualization image.
+        - graph_data: The generated visualization graph data.
         - title: The title of the visualization.
-        - code_stats: Analysis of the provided code.
         - language_used: The detected or specified programming language.
         - uploaded_file (optional): The name of the uploaded file, if a file was uploaded.
         - error (optional): An error message if an error occurred during processing.
@@ -84,57 +91,225 @@ Raises:
     Exception: If an error occurs during file handling, code processing, or visualization generation.
 """
 @app.route('/visualize', methods=['POST'])
-def visualize():
+def visualize_code():
     try:
-        uploaded_filename = None
-
-        if 'file' in request.files and request.files['file'].filename:
-            file = request.files['file']
-            if file and allowed_file(file.filename):
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    code = f.read()
-                uploaded_filename = filename
-                os.remove(filepath)  # Clean up after reading
-            else:
-                return jsonify({"error": "Invalid file type. Only .py and .java files are allowed."})
+        # Parse request data
+        if request.is_json:
+            data = request.get_json()
         else:
-            code = request.form.get('code', '').strip()
-            if not code:
-                return jsonify({"error": "No code provided. Please either upload a file or paste code."})
-
-        language = request.form.get('language', 'auto')
-        if language == 'auto':
-            language = detect_language(code)
-
-        diagram_type = request.form.get('diagram_type', 'ast')
-
-        # Use thread lock for matplotlib operations
-        with plot_lock:
-            try:
-                graph_image, title = generate_visualization(code, language, diagram_type)
-            except Exception as viz_error:
-                return jsonify({"error": f"Visualization error: {str(viz_error)}"})
-
-        response_data = {
-            "image": graph_image,
-            "title": title,
-            "code_stats": analyze_code(code, language),
-            "language_used": language
-        }
-
-        if uploaded_filename:
-            response_data["uploaded_file"] = uploaded_filename
-
-        return jsonify(response_data)
-
+            data = {
+                'code': request.form.get('code', ''),
+                'language': request.form.get('language', ''),
+                'diagram_type': request.form.get('diagram_type', 'ast')
+            }
+        
+        # Validate input
+        code = data.get('code', '').strip()
+        language = data.get('language', '').lower()
+        diagram_type = data.get('diagram_type', 'ast').lower()
+        
+        if not code:
+            return jsonify({
+                'error': 'Missing code',
+                'details': 'Source code is required for visualization'
+            }), 400
+        
+        if language not in ['python', 'java']:
+            language = 'python' if 'def ' in code or 'import ' in code else 'java'
+        
+        if diagram_type not in ['ast', 'cfg', 'ddg']:
+            diagram_type = 'ast'
+        
+        # Generate visualization
+        try:
+            # Create a NetworkX graph from the code
+            parser = SourceCodeParser()
+            G, metadata = parser.parse(code, language)
+            
+            # Convert NetworkX graph to D3.js format
+            nodes = []
+            links = []
+            
+            # Process nodes
+            for node in G.nodes():
+                node_data = G.nodes[node]
+                nodes.append({
+                    'id': str(node),
+                    'label': str(node),
+                    'type': node_data.get('type', 'default'),
+                    'color': _get_node_color(node_data.get('type', 'default')),
+                    'value': node_data.get('value', '')
+                })
+            
+            # Process edges
+            for source, target in G.edges():
+                links.append({
+                    'source': str(source),
+                    'target': str(target)
+                })
+            
+            # Generate title based on diagram type
+            title_map = {
+                'ast': 'Abstract Syntax Tree',
+                'cfg': 'Control Flow Graph',
+                'ddg': 'Data Dependency Graph'
+            }
+            title = title_map.get(diagram_type, 'Code Visualization')
+            
+            return jsonify({
+                'graph_data': {
+                    'nodes': nodes,
+                    'links': links
+                },
+                'title': title,
+                'language': language,
+                'diagram_type': diagram_type,
+                'parsing_metadata': metadata
+            })
+        except Exception as viz_error:
+            app.logger.error(f"Visualization generation error: {str(viz_error)}")
+            return jsonify({
+                'error': 'Visualization generation failed',
+                'details': str(viz_error)
+            }), 500
+    
     except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"})
+        app.logger.error(f"Request processing error: {str(e)}")
+        return jsonify({
+            'error': 'Request processing failed',
+            'details': str(e)
+        }), 400
 
+def _get_node_color(node_type: str) -> str:
+    """
+    Generate a color based on the node type for more granular visualization.
+    
+    Args:
+        node_type (str): Type of the AST node
+    
+    Returns:
+        str: Hex color code for the node
+    """
+    # Comprehensive color mapping for different node types
+    color_map = {
+        # Python-specific node types
+        'Module': '#2C3E50',           # Dark blue-gray for module/file level
+        'ClassDef': '#3498DB',         # Bright blue for class definitions
+        'FunctionDef': '#2ECC71',      # Green for function definitions
+        'AsyncFunctionDef': '#27AE60',  # Darker green for async functions
+        
+        # Variable and attribute types
+        'Name': '#F39C12',             # Orange for variable names
+        'Attribute': '#9B59B6',        # Purple for attributes
+        'Constant': '#E67E22',         # Warm orange for constants
+        
+        # Control flow nodes
+        'If': '#E74C3C',               # Red for if statements
+        'For': '#3498DB',              # Blue for for loops
+        'While': '#9B59B6',            # Purple for while loops
+        'Try': '#1ABC9C',              # Teal for try blocks
+        'Except': '#F1C40F',           # Yellow for except blocks
+        
+        # Expression and call types
+        'Call': '#16A085',             # Teal for function calls
+        'BinOp': '#D35400',            # Dark orange for binary operations
+        'Compare': '#8E44AD',          # Deep purple for comparisons
+        
+        # Import and module-related
+        'Import': '#34495E',           # Dark slate gray for imports
+        'ImportFrom': '#2980B9',       # Slightly lighter blue for from imports
+        
+        # Java-specific node types
+        'ClassDeclaration': '#3498DB',     # Blue for Java classes
+        'MethodDeclaration': '#2ECC71',    # Green for Java methods
+        'FieldDeclaration': '#F39C12',     # Orange for Java fields
+        'ConstructorDeclaration': '#E74C3C', # Red for constructors
+        'InterfaceDeclaration': '#9B59B6',  # Purple for interfaces
+        
+        # Default fallback
+        'default': '#95A5A6'           # Light gray for unrecognized types
+    }
+    
+    return color_map.get(node_type, color_map['default'])
 
-def analyze_code(code: str, language: str) -> dict:
+def _generate_graph_image(G: nx.DiGraph) -> str:
+    """
+    Generate a graph visualization with Graphviz for enhanced spacing and coloring
+    
+    Args:
+        G (nx.DiGraph): Input graph to visualize
+    
+    Returns:
+        str: Base64 encoded SVG of the graph
+    """
+    # Ensure graph is not empty
+    if len(G.nodes()) == 0:
+        G.add_node("Empty Graph")
+    
+    # Create a new directed graph with enhanced styling
+    dot = graphviz.Digraph(
+        comment='Code Structure',
+        engine='dot',  # Use dot layout engine for hierarchical layout
+        graph_attr={
+            'rankdir': 'TB',  # Top to Bottom layout
+            'splines': 'ortho',  # Orthogonal edges
+            'nodesep': '2.0',  # Significantly increased node horizontal separation
+            'ranksep': '2.5',  # Significantly increased vertical rank separation
+            'margin': '1.0',  # Add larger margin around the entire graph
+        },
+        node_attr={
+            'style': 'filled,rounded',  # Rounded nodes
+            'fontname': 'Arial',
+            'fontsize': '10',
+            'shape': 'box',
+            'fontcolor': 'black',  # Explicit black font color
+            'color': 'black',  # Black border
+            'penwidth': '1.5',  # Thicker border
+        },
+        edge_attr={
+            'color': 'gray',
+            'penwidth': '1.0'
+        }
+    )
+
+    # Color mapping function with improved palette
+    def get_node_color(node_type):
+        color_map = {
+            'ClassDef': 'lightblue',
+            'FunctionDef': 'lightgreen',
+            'MethodDeclaration': 'lightyellow',
+            'default': 'white'
+        }
+        return color_map.get(node_type, color_map['default'])
+
+    # Add nodes with type-based coloring and enhanced labeling
+    for node in G.nodes():
+        node_type = G.nodes[node].get('type', 'default')
+        node_label = G.nodes[node].get('value', node_type)
+        
+        # Truncate long labels with ellipsis
+        if len(node_label) > 30:
+            node_label = node_label[:30] + '...'
+        
+        dot.node(
+            str(node), 
+            node_label, 
+            fillcolor=get_node_color(node_type),
+            fontcolor='black',  # Ensure black text for each node
+            color='black'  # Black border for each node
+        )
+
+    # Add edges with slight curve
+    for edge in G.edges():
+        dot.edge(str(edge[0]), str(edge[1]), style='curved')
+
+    # Render to SVG with UTF-8 encoding
+    svg_data = dot.pipe(format='svg', encoding='utf-8')
+    
+    # Encode to base64
+    return base64.b64encode(svg_data).decode('utf-8')
+
+def get_code_stats(code: str, language: str) -> dict:
     """Analyzes the code and returns basic statistics."""
     stats = {
         "lines_of_code": len([line for line in code.splitlines() if line.strip()]),
@@ -160,4 +335,4 @@ def analyze_code(code: str, language: str) -> dict:
 
 
 if __name__ == '__main__':
-    app.run(debug=False, threaded=True)
+    app.run(debug=True, threaded=True)

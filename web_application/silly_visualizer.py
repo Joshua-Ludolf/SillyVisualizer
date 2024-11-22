@@ -10,6 +10,8 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import io
 import base64
+import hashlib
+import numpy as np
 
 class ASTNode:
     """
@@ -40,345 +42,774 @@ class SourceCodeParser:
         Parses Java source code and returns a directed graph and metadata.
     """
     @staticmethod
-    def parse(source_code: str, language: str) -> Tuple[nx.DiGraph, Dict[str, Any]]:
-        if language == 'python':
-            return SourceCodeParser._parse_python(source_code)
-        elif language == 'java':
-            return SourceCodeParser._parse_java(source_code)
-        else:
-            raise ValueError(f"Unsupported language: {language}")
-
-    @staticmethod
-    def _parse_python(source_code: str) -> Tuple[nx.DiGraph, Dict[str, Any]]:
-        tree = ast.parse(source_code)
+    def parse(code: str, language: str, max_depth: int = 10) -> Tuple[nx.DiGraph, Dict[str, Any]]:
+        """
+        Parse code and generate a networkx graph representation with enhanced error handling and depth limiting.
+        
+        Args:
+            code (str): Source code to parse
+            language (str): Programming language ('python' or 'java')
+            max_depth (int): Maximum recursion depth to prevent infinite recursion
+        
+        Returns:
+            Tuple[nx.DiGraph, Dict[str, Any]]: Parsed graph and metadata
+        """
         G = nx.DiGraph()
-        metadata = {
-            "functions": [],
-            "classes": [],
-            "variables": [],
-            "imports": []
+        metadata: Dict[str, Any] = {
+            'parse_error': None,
+            'total_nodes': 0,
+            'language': language,
+            'max_depth_reached': False
         }
 
-        def add_node(node, parent_id=None):
-            node_id = id(node)
-            node_type = type(node).__name__
-            node_value = ""
+        # Preprocessing: Remove BOM and normalize line endings
+        code = code.replace('\ufeff', '').replace('\r\n', '\n')
 
-            if isinstance(node, ast.FunctionDef):
-                node_value = f"Function: {node.name}"
-                metadata["functions"].append({
-                    "name": node.name,
-                    "line": node.lineno,
-                    "args": [arg.arg for arg in node.args.args]
-                })
-            elif isinstance(node, ast.ClassDef):
-                node_value = f"Class: {node.name}"
-                metadata["classes"].append({
-                    "name": node.name,
-                    "line": node.lineno,
-                    "bases": [base.id for base in node.bases if isinstance(base, ast.Name)]
-                })
-            elif isinstance(node, ast.Name):
-                node_value = f"Name: {node.id}"
-                if isinstance(node.ctx, ast.Store):
-                    metadata["variables"].append({
-                        "name": node.id,
-                        "line": node.lineno
-                    })
-            elif isinstance(node, ast.Import):
-                for name in node.names:
-                    metadata["imports"].append({
-                        "name": name.name,
-                        "alias": name.asname,
-                        "line": node.lineno
-                    })
-
-            G.add_node(node_id, type=node_type, value=node_value, lineno=getattr(node, 'lineno', None))
-            if parent_id is not None:
-                G.add_edge(parent_id, node_id)
-
-            for child in ast.iter_child_nodes(node):
-                add_node(child, node_id)
-
-        add_node(tree)
-        return G, metadata
-
-    @staticmethod
-    def _parse_java(source_code: str) -> Tuple[nx.DiGraph, Dict[str, Any]]:
         try:
-            tree = javalang.parse.parse(source_code)
-            G = nx.DiGraph()
-            metadata = {
-                "functions": [],
-                "classes": [],
-                "variables": [],
-                "imports": []
-            }
+            if language == 'python':
+                # More robust Python parsing
+                try:
+                    tree = ast.parse(code)
+                except SyntaxError as e:
+                    # Attempt partial parsing for incomplete code
+                    try:
+                        tree = ast.parse(code, mode='eval')
+                    except Exception:
+                        # Create an error graph if parsing completely fails
+                        G.add_node("Python Parsing Error", 
+                                   type="Error", 
+                                   value=f"Line {e.lineno}: {e.text}")
+                        metadata['parse_error'] = str(e)
+                        return G, metadata
+                
+                def add_node(node, parent=None, depth: int = 0, visited: set = None):
+                    # Prevent infinite recursion
+                    if visited is None:
+                        visited = set()
+                    
+                    if depth > max_depth:
+                        metadata['max_depth_reached'] = True
+                        return
+                    
+                    # Prevent revisiting nodes to break potential cycles
+                    node_id = id(node)
+                    if node_id in visited:
+                        return
+                    visited.add(node_id)
+                    
+                    node_type = node.__class__.__name__
+                    
+                    # More comprehensive node value extraction
+                    node_value = ""
+                    try:
+                        if isinstance(node, ast.Name):
+                            node_value = node.id
+                        elif isinstance(node, ast.FunctionDef):
+                            node_value = node.name
+                        elif isinstance(node, ast.ClassDef):
+                            node_value = node.name
+                        elif isinstance(node, ast.Attribute):
+                            node_value = node.attr
+                        elif isinstance(node, ast.Call):
+                            node_value = getattr(node.func, 'id', str(node.func))
+                        else:
+                            node_value = str(node)
+                    except Exception:
+                        node_value = str(node)
+                    
+                    # Add node to graph with error handling
+                    try:
+                        G.add_node(node_id, type=node_type, value=node_value)
+                        
+                        # Connect to parent if exists
+                        if parent is not None:
+                            G.add_edge(id(parent), node_id)
+                        
+                        # Recursively process child nodes
+                        child_nodes = list(ast.iter_child_nodes(node))
+                        for child in child_nodes:
+                            add_node(child, node, depth + 1, visited)
+                    except Exception as child_error:
+                        print(f"Error processing child node: {child_error}")
 
-            def process_node(node, parent_id=None):
-                node_id = id(node)
-                node_type = type(node).__name__
-                node_value = ""
+                # Start parsing from the root
+                add_node(tree)
+                
+                metadata['total_nodes'] = len(G.nodes())
 
-                # Handle different Java node types
-                if isinstance(node, javalang.tree.MethodDeclaration):
-                    node_value = f"Method: {node.name}"
-                    metadata["functions"].append({
-                        "name": node.name,
-                        "return_type": str(node.return_type) if node.return_type else "void",
-                        "modifiers": list(node.modifiers) if node.modifiers else []
-                    })
-                elif isinstance(node, javalang.tree.ClassDeclaration):
-                    node_value = f"Class: {node.name}"
-                    metadata["classes"].append({
-                        "name": node.name,
-                        "extends": node.extends.name if node.extends else None,
-                        "implements": [impl.name for impl in node.implements] if node.implements else []
-                    })
-                elif isinstance(node, javalang.tree.VariableDeclarator):
-                    node_value = f"Variable: {node.name}"
-                    metadata["variables"].append({
-                        "name": node.name,
-                        "type": str(node.type) if hasattr(node, 'type') else None
-                    })
-                elif isinstance(node, javalang.tree.Import):  # Changed from ImportDeclaration to Import
-                    path = '.'.join(node.path)
-                    node_value = f"Import: {path}"
-                    metadata["imports"].append({
-                        "path": path,
-                        "static": node.static if hasattr(node, 'static') else False,
-                        "wildcard": node.wildcard if hasattr(node, 'wildcard') else False
-                    })
+            elif language == 'java':
+                # More robust Java parsing
+                try:
+                    tree = javalang.parse.parse(code)
+                except Exception as e:
+                    # Create an error graph if parsing fails
+                    G.add_node("Java Parsing Error", 
+                               type="Error", 
+                               value=str(e))
+                    metadata['parse_error'] = str(e)
+                    return G, metadata
+                
+                def add_java_node(node, parent=None, depth: int = 0, visited: set = None):
+                    # Prevent infinite recursion
+                    if visited is None:
+                        visited = set()
+                    
+                    if depth > max_depth:
+                        metadata['max_depth_reached'] = True
+                        return
+                    
+                    # Prevent revisiting nodes to break potential cycles
+                    node_id = id(node)
+                    if node_id in visited:
+                        return
+                    visited.add(node_id)
+                    
+                    node_type = node.__class__.__name__
+                    
+                    # More comprehensive node value extraction
+                    node_value = ""
+                    try:
+                        if hasattr(node, 'name'):
+                            node_value = node.name
+                        elif hasattr(node, 'type'):
+                            node_value = str(node.type)
+                        else:
+                            node_value = str(node)
+                    except Exception:
+                        node_value = str(node)
+                    
+                    # Add node to graph with error handling
+                    try:
+                        G.add_node(node_id, type=node_type, value=node_value)
+                        
+                        # Connect to parent if exists
+                        if parent is not None:
+                            G.add_edge(id(parent), node_id)
+                        
+                        # Recursively process child nodes
+                        for _, child in node:
+                            if isinstance(child, (list, tuple)):
+                                for sub_child in child:
+                                    if hasattr(sub_child, '__class__'):
+                                        add_java_node(sub_child, node, depth + 1, visited)
+                            elif hasattr(child, '__class__'):
+                                add_java_node(child, node, depth + 1, visited)
+                    except Exception as child_error:
+                        print(f"Error processing Java child node: {child_error}")
+                
+                # Start parsing from the root
+                for type_declaration in tree.types:
+                    add_java_node(type_declaration)
+                
+                metadata['total_nodes'] = len(G.nodes())
 
-                G.add_node(node_id, type=node_type, value=node_value)
-                if parent_id is not None:
-                    G.add_edge(parent_id, node_id)
+            else:
+                raise ValueError(f"Unsupported language: {language}")
 
-                # Process all attributes of the node that might contain child nodes
-                for attr_name, attr_value in node.__dict__.items():
-                    if isinstance(attr_value, javalang.ast.Node):
-                        process_node(attr_value, node_id)
-                    elif isinstance(attr_value, list):
-                        for item in attr_value:
-                            if isinstance(item, javalang.ast.Node):
-                                process_node(item, node_id)
-
-            process_node(tree)
+            # Ensure graph is not empty
             if len(G.nodes()) == 0:
-                raise ValueError("No nodes were generated from the Java code")
+                G.add_node("Empty Graph", type="Placeholder", value="No nodes found")
 
             return G, metadata
 
         except Exception as e:
-            raise ValueError(f"Failed to parse Java code: {str(e)}")
+            # Comprehensive fallback for any unexpected errors
+            G.add_node("Parsing Error", type="Error", value=str(e))
+            metadata['parse_error'] = str(e)
+            return G, metadata
 
 class DiagramGenerator:
-    """
-    A class used to generate various types of diagrams for visualizing code structures.
-    Methods
-    -------
-    generate_ast(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure
-        Generates an Abstract Syntax Tree (AST) visualization from a directed graph.
-    generate_cfg(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure
-        Generates a Control Flow Graph (CFG) visualization from a directed graph.
-    generate_ddg(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure
-        Generates a Data Dependency Graph (DDG) visualization from a directed graph.
-    """
     @staticmethod
-    def generate_ast(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure:
-        plt.figure(figsize=(15, 10))
-        pos = nx.spring_layout(G, k=2, iterations=50)
+    def _get_node_color(node_type: str) -> str:
+        """
+        Generate a color based on the node type for more granular visualization.
+        
+        Args:
+            node_type (str): Type of the AST node
+        
+        Returns:
+            str: Hex color code for the node
+        """
+        # Comprehensive color mapping for different node types
+        color_map = {
+            # Python-specific node types
+            'Module': '#2C3E50',           # Dark blue-gray for module/file level
+            'ClassDef': '#3498DB',         # Bright blue for class definitions
+            'FunctionDef': '#2ECC71',      # Green for function definitions
+            'AsyncFunctionDef': '#27AE60',  # Darker green for async functions
+            
+            # Variable and attribute types
+            'Name': '#F39C12',             # Orange for variable names
+            'Attribute': '#9B59B6',        # Purple for attributes
+            'Constant': '#E67E22',         # Warm orange for constants
+            
+            # Control flow nodes
+            'If': '#E74C3C',               # Red for if statements
+            'For': '#3498DB',              # Blue for for loops
+            'While': '#9B59B6',            # Purple for while loops
+            'Try': '#1ABC9C',              # Teal for try blocks
+            'Except': '#F1C40F',           # Yellow for except blocks
+            
+            # Expression and call types
+            'Call': '#16A085',             # Teal for function calls
+            'BinOp': '#D35400',            # Dark orange for binary operations
+            'Compare': '#8E44AD',          # Deep purple for comparisons
+            
+            # Import and module-related
+            'Import': '#34495E',           # Dark slate gray for imports
+            'ImportFrom': '#2980B9',       # Slightly lighter blue for from imports
+            
+            # Default fallback
+            'default': '#95A5A6'           # Light gray for unrecognized types
+        }
+        
+        # Java-specific node types (additional mapping)
+        java_color_map = {
+            'ClassDeclaration': '#3498DB',     # Blue for Java classes
+            'MethodDeclaration': '#2ECC71',    # Green for Java methods
+            'FieldDeclaration': '#F39C12',     # Orange for Java fields
+            'ConstructorDeclaration': '#E74C3C', # Red for constructors
+            'InterfaceDeclaration': '#9B59B6'  # Purple for interfaces
+        }
+        
+        # Merge mappings, with Java types taking precedence if needed
+        color_map.update(java_color_map)
+        
+        # Return color, defaulting to light gray if not found
+        return color_map.get(node_type, color_map['default'])
 
-        # Node styling
-        node_colors = []
-        node_sizes = []
-        labels = {}
+    @staticmethod
+    def _generate_graph_image(G: nx.DiGraph) -> str:
+        """
+        Convert networkx graph to base64 encoded image with improved layout
+        
+        Args:
+            G (nx.DiGraph): Graph to visualize
+        
+        Returns:
+            str: Base64 encoded image
+        """
+        # Ensure graph is not empty
+        if len(G.nodes()) == 0:
+            G.add_node("Empty Graph")
+        
+        # Calculate node depths from root nodes (nodes with no incoming edges)
+        def get_node_depth(G, node, visited=None):
+            """Calculate the depth of a node in the graph."""
+            if visited is None:
+                visited = set()
+            
+            # Handle cycles and already visited nodes
+            if node in visited:
+                return 0
+            visited.add(node)
+            
+            try:
+                # Get predecessors safely with error handling
+                predecessors = list(G.predecessors(node)) if G.has_node(node) else []
+                if not predecessors:  # If node has no predecessors (root node)
+                    return 0
+                    
+                # Calculate max depth from predecessors
+                max_depth = 0
+                for pred in predecessors:
+                    if pred not in visited and G.has_node(pred):  # Check if predecessor exists
+                        try:
+                            depth = get_node_depth(G, pred, visited.copy())  # Use copy to prevent modifying original set
+                            max_depth = max(max_depth, depth)
+                        except Exception as e:
+                            print(f"Error in depth calculation for predecessor {pred}: {str(e)}")
+                            continue  # Skip problematic predecessors
+                return max_depth + 1
+            except Exception as e:
+                print(f"Error in get_node_depth for node {node}: {str(e)}")
+                return 0  # Return safe default
 
-        for node in G.nodes():
-            node_type = G.nodes[node]['type']
-            node_value = G.nodes[node]['value']
+        # Calculate depths for all nodes with error handling
+        try:
+            node_depths = {}
+            for node in list(G.nodes()):  # Convert to list to avoid modification during iteration
+                try:
+                    if G.has_node(node):  # Verify node still exists
+                        node_depths[node] = get_node_depth(G, node)
+                    else:
+                        node_depths[node] = 0
+                except Exception as e:
+                    print(f"Error calculating depth for node {node}: {str(e)}")
+                    node_depths[node] = 0  # Default to 0 for problematic nodes
+            
+            max_depth = max(node_depths.values()) if node_depths else 0
+        except Exception as e:
+            print(f"Error in depth calculation: {str(e)}")
+            # Fallback to simple layout if depth calculation fails
+            node_depths = {node: 0 for node in G.nodes()}
+            max_depth = 0
 
-            if 'Method' in node_type or 'Function' in str(node_value):
-                node_colors.append('#ff7f0e')  # Orange
-                node_sizes.append(2000)
-            elif 'Class' in node_type:
-                node_colors.append('#1f77b4')  # Blue
-                node_sizes.append(2500)
-            elif 'Import' in str(node_value):
-                node_colors.append('#2ca02c')  # Green
-                node_sizes.append(1500)
-            elif 'Variable' in str(node_value):
-                node_colors.append('#9467bd')  # Purple
-                node_sizes.append(1500)
+        # Use spring layout with custom parameters for better distribution
+        try:
+            if len(G.nodes()) > 1:
+                pos = nx.spring_layout(
+                    G,
+                    k=25.0,  # Large spacing between nodes
+                    iterations=1000,  # More iterations for better distribution
+                    scale=15.0,  # Large scale for overall spacing
+                    weight=None  # Ignore edge weights
+                )
             else:
-                node_colors.append('#d62728')  # Red
-                node_sizes.append(1000)
+                # For single node or empty graph, use simple circular layout
+                pos = nx.circular_layout(G)
+        except Exception as e:
+            print(f"Error in spring layout: {str(e)}")
+            # Fallback to simpler layout if spring layout fails
+            try:
+                pos = nx.shell_layout(G)
+            except:
+                # Last resort: manual positioning
+                pos = {node: [0.5, 0.5] for node in G.nodes()}
 
-            # Truncate long labels
-            label = node_value if node_value else node_type
-            if len(label) > 30:
-                label = label[:27] + "..."
-            labels[node] = label
-
-        nx.draw(G, pos,
-                node_color=node_colors,
-                node_size=node_sizes,
-                labels=labels,
-                with_labels=True,
-                font_size=8,
-                font_weight='bold',
-                arrows=True,
-                edge_color='gray',
-                width=1,
-                arrowsize=10)
-
-        plt.title("Abstract Syntax Tree (AST) Visualization", pad=20)
-        return plt.gcf()
-
-    @staticmethod
-    def generate_cfg(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure:
-        plt.figure(figsize=(15, 10))
-        cfg = nx.DiGraph()
-
-        # Create CFG nodes for functions/methods
-        for func in metadata["functions"]:
-            func_name = func["name"]
-            cfg.add_node(func_name, type="function")
-            entry_node = f"{func_name}_entry"
-            exit_node = f"{func_name}_exit"
-
-            cfg.add_node(entry_node, type="entry")
-            cfg.add_node(exit_node, type="exit")
-            cfg.add_edge(entry_node, func_name)
-            cfg.add_edge(func_name, exit_node)
-
-        # If no functions were found, add a message node
-        if len(cfg.nodes()) == 0:
-            cfg.add_node("No functions found", type="message")
-
-        # Draw CFG
-        pos = nx.spring_layout(cfg, k=2)
+        # Adjust y-coordinates based on depth with error handling
+        for node in list(pos.keys()):  # Convert to list to avoid modification during iteration
+            try:
+                if node not in G.nodes():  # Skip if node no longer exists
+                    continue
+                    
+                depth = node_depths.get(node, 0)  # Use get() with default value
+                if max_depth > 0:  # Avoid division by zero
+                    pos[node][1] = 1.0 - (depth / (max_depth + 1)) * 2
+                else:
+                    pos[node][1] = 0.5  # Center nodes vertically if no depth info
+                
+                # Add minimal controlled randomness to x-coordinate
+                if max_depth > 0:
+                    pos[node][0] *= (1 + 0.05 * (depth / max_depth))  # Reduced randomness factor
+            except Exception as e:
+                print(f"Error adjusting position for node {node}: {str(e)}")
+                # Provide safe default position if adjustment fails
+                pos[node] = [0.5, 0.5]
+        
+        # Enhanced node styling with error handling
         node_colors = []
         node_sizes = []
-
-        for node in cfg.nodes():
-            if cfg.nodes[node]['type'] == 'function':
-                node_colors.append('#1f77b4')
-                node_sizes.append(2000)
-            elif cfg.nodes[node]['type'] == 'entry':
-                node_colors.append('#2ca02c')
-                node_sizes.append(1500)
-            elif cfg.nodes[node]['type'] == 'message':
-                node_colors.append('#d62728')
-                node_sizes.append(2000)
-            else:  # exit nodes
-                node_colors.append('#d62728')
-                node_sizes.append(1500)
-
-        nx.draw(cfg, pos,
-                node_color=node_colors,
-                node_size=node_sizes,
-                with_labels=True,
-                font_size=10,
-                font_weight='bold',
-                arrows=True,
-                edge_color='gray',
-                width=1,
-                arrowsize=10)
-
-        plt.title("Control Flow Graph (CFG) Visualization", pad=20)
-        return plt.gcf()
+        node_labels = {}
+        edge_colors = []
+        edge_styles = []
+        
+        try:
+            # Process nodes with comprehensive error handling
+            for node in G.nodes():
+                try:
+                    node_type = G.nodes[node].get('type', 'default')
+                    node_colors.append(DiagramGenerator._get_node_color(node_type))
+                    
+                    # Determine node size based on type and connections
+                    size_factor = 1000  # Base size
+                    if node_type in ['Module', 'ClassDef', 'ClassDeclaration']:
+                        size_factor = 2000
+                    elif node_type in ['FunctionDef', 'MethodDeclaration']:
+                        size_factor = 1500
+                    node_sizes.append(size_factor)
+                    
+                    # Create safe node labels
+                    label = str(G.nodes[node].get('value', '')).replace('"', '').replace("'", "")
+                    if len(label) > 20:  # Truncate long labels
+                        label = label[:17] + "..."
+                    node_labels[node] = label
+                except Exception as e:
+                    print(f"Error processing node {node}: {str(e)}")
+                    node_colors.append('#CCCCCC')  # Default gray
+                    node_sizes.append(1000)  # Default size
+                    node_labels[node] = str(node)[:10]  # Safe truncated label
+            
+            # Process edges with error handling
+            for edge in G.edges():
+                try:
+                    edge_colors.append('#666666')  # Consistent edge color
+                    edge_styles.append('-')  # Solid line style
+                except Exception as e:
+                    print(f"Error processing edge {edge}: {str(e)}")
+                    edge_colors.append('#CCCCCC')  # Default edge color
+                    edge_styles.append(':')  # Dotted line for error cases
+            
+            # Clear any existing plots
+            plt.clf()
+            
+            # Create figure with white background
+            fig = plt.figure(figsize=(12, 8), facecolor='white')
+            ax = fig.add_subplot(1, 1, 1)
+            ax.set_facecolor('white')
+            
+            # Draw the graph with safe defaults
+            if not pos:  # If position calculation failed
+                pos = nx.spring_layout(G)  # Fallback layout
+            
+            # Draw nodes with error handling
+            try:
+                nx.draw_networkx_nodes(G, pos, 
+                                     node_color=node_colors if node_colors else '#CCCCCC',
+                                     node_size=node_sizes if node_sizes else 1000)
+            except Exception as e:
+                print(f"Error drawing nodes: {str(e)}")
+                # Fallback to simple node drawing
+                nx.draw_networkx_nodes(G, pos, node_color='#CCCCCC', node_size=1000)
+            
+            # Draw edges with error handling
+            try:
+                nx.draw_networkx_edges(G, pos, 
+                                     edge_color=edge_colors if edge_colors else '#666666',
+                                     style=edge_styles if edge_styles else '-',
+                                     arrows=True, arrowsize=20)
+            except Exception as e:
+                print(f"Error drawing edges: {str(e)}")
+                # Fallback to simple edge drawing
+                nx.draw_networkx_edges(G, pos, edge_color='#666666')
+            
+            # Draw labels with error handling
+            try:
+                nx.draw_networkx_labels(G, pos, node_labels,
+                                      font_size=8,
+                                      font_family='sans-serif')
+            except Exception as e:
+                print(f"Error drawing labels: {str(e)}")
+                # Fallback to simple labels
+                nx.draw_networkx_labels(G, pos, {n: str(n)[:10] for n in G.nodes()})
+            
+            # Remove axes
+            plt.axis('off')
+            
+        except Exception as e:
+            print(f"Critical error in graph drawing: {str(e)}")
+            # Create a minimal fallback visualization
+            plt.clf()
+            fig = plt.figure(figsize=(8, 6), facecolor='white')
+            ax = fig.add_subplot(1, 1, 1)
+            ax.text(0.5, 0.5, f"Error generating visualization:\n{str(e)}", 
+                   horizontalalignment='center', verticalalignment='center')
+            ax.axis('off')
+        
+        # Save to buffer
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='svg', bbox_inches='tight', dpi=150, 
+                   pad_inches=0.5, facecolor='white', edgecolor='none')
+        plt.close()
+        
+        # Encode to base64
+        svg_data = buffer.getvalue().decode('utf-8')
+        svg_base64 = base64.b64encode(svg_data.encode('utf-8')).decode('utf-8')
+        
+        return svg_base64
 
     @staticmethod
-    def generate_ddg(G: nx.DiGraph, metadata: Dict[str, Any]) -> plt.Figure:
-        plt.figure(figsize=(15, 10))
-        ddg = nx.DiGraph()
+    def generate_ast(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
+        """
+        Generate an interactive graph representation of the AST.
 
-        # Add variables and their dependencies
-        var_nodes = set()
-        for var in metadata["variables"]:
-            var_name = var["name"]
-            var_nodes.add(var_name)
-            ddg.add_node(var_name, type="variable")
+        Args:
+            G (nx.DiGraph): The graph to visualize
+            metadata (Dict[str, Any]): Metadata about the graph
 
-        # Add functions and their variable dependencies
-        for func in metadata["functions"]:
-            func_name = func["name"]
-            ddg.add_node(func_name, type="function")
+        Returns:
+            str: Base64 encoded SVG of the graph
+        """
+        return DiagramGenerator._generate_graph_image(G)
 
-            # Connect function arguments
-            if "args" in func:
-                for arg in func["args"]:
-                    ddg.add_node(arg, type="argument")
-                    ddg.add_edge(arg, func_name)
+    @staticmethod
+    def generate_cfg(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
+        """
+        Generate a Control Flow Graph (CFG) visualization.
 
-        # If no nodes were added, add a message node
-        if len(ddg.nodes()) == 0:
-            ddg.add_node("No data dependencies found", type="message")
+        Args:
+            G (nx.DiGraph): The control flow graph
+            metadata (Dict[str, Any]): Metadata about the graph
 
-        # Draw DDG
-        pos = nx.spring_layout(ddg, k=2)
-        node_colors = []
-        node_sizes = []
+        Returns:
+            str: Base64 encoded SVG of the graph
+        """
+        return DiagramGenerator._generate_graph_image(G)
 
-        for node in ddg.nodes():
-            node_type = ddg.nodes[node]['type']
-            if node_type == 'function':
-                node_colors.append('#1f77b4')
-                node_sizes.append(2000)
-            elif node_type == 'variable':
-                node_colors.append('#2ca02c')
-                node_sizes.append(1500)
-            elif node_type == 'message':
-                node_colors.append('#d62728')
-                node_sizes.append(2000)
-            else:  # arguments
-                node_colors.append('#ff7f0e')
-                node_sizes.append(1500)
+    @staticmethod
+    def generate_ddg(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
+        """
+        Generate a Data Dependency Graph (DDG) visualization.
 
-        nx.draw(ddg, pos,
-                node_color=node_colors,
-                node_size=node_sizes,
-                with_labels=True,
-                font_size=10,
-                font_weight='bold',
-                arrows=True,
-                edge_color='gray',
-                width=1,
-                arrowsize=10)
+        Args:
+            G (nx.DiGraph): The data dependency graph
+            metadata (Dict[str, Any]): Metadata about the graph
 
-        plt.title("Data Dependency Graph (DDG) Visualization", pad=20)
-        return plt.gcf()
+        Returns:
+            str: Base64 encoded SVG of the graph
+        """
+        return DiagramGenerator._generate_graph_image(G)
 
-
-def generate_visualization(code: str, language: str, diagram_type: str) -> Tuple[str, str]:
-    """Generate visualization for the given code and diagram type."""
+def generate_visualization(code: str, language: str, diagram_type: str) -> Tuple[str, str, Dict[str, Any]]:
+    """
+    Generate visualization for the given code and diagram type.
+    
+    Args:
+        code (str): Source code to visualize
+        language (str): Programming language ('python' or 'java')
+        diagram_type (str): Type of diagram to generate ('ast', 'cfg', 'ddg')
+    
+    Returns:
+        Tuple[str, str, Dict[str, Any]]: Base64 encoded SVG, title, and parsing metadata
+    """
+    plt.close('all')  # Ensure all previous plots are closed
+    
     try:
-        # Parse the code
+        # Generate a consistent seed based on the code content
+        import hashlib
+        # Create a hash of the code and diagram type
+        seed_string = f"{code}{language}{diagram_type}"
+        hash_object = hashlib.md5(seed_string.encode())
+        # Convert first 4 bytes of hash to integer and ensure it's within valid range
+        seed = int.from_bytes(hash_object.digest()[:4], byteorder='big') & 0x7FFFFFFF  # Ensures value between 0 and 2^31-1
+        
+        # Set random seeds for consistent layout
+        import random
+        random.seed(seed)
+        np.random.seed(seed)
+        
+        # Parse the code and generate graph
         G, metadata = SourceCodeParser.parse(code, language)
+        
+        # Generate the diagram based on type
+        plt.figure(figsize=(14, 12), dpi=150)
+        
+        # Ensure graph is not empty
+        if len(G.nodes()) == 0:
+            # Create a placeholder graph if no nodes exist
+            G.add_node("Empty Graph")
+        
+        # Calculate node depths from root nodes (nodes with no incoming edges)
+        def get_node_depth(G, node, visited=None):
+            """Calculate the depth of a node in the graph."""
+            if visited is None:
+                visited = set()
+            
+            # Handle cycles and already visited nodes
+            if node in visited:
+                return 0
+            visited.add(node)
+            
+            try:
+                # Get predecessors safely with error handling
+                predecessors = list(G.predecessors(node)) if G.has_node(node) else []
+                if not predecessors:  # If node has no predecessors (root node)
+                    return 0
+                    
+                # Calculate max depth from predecessors
+                max_depth = 0
+                for pred in predecessors:
+                    if pred not in visited and G.has_node(pred):  # Check if predecessor exists
+                        try:
+                            depth = get_node_depth(G, pred, visited.copy())  # Use copy to prevent modifying original set
+                            max_depth = max(max_depth, depth)
+                        except Exception as e:
+                            print(f"Error in depth calculation for predecessor {pred}: {str(e)}")
+                            continue  # Skip problematic predecessors
+                return max_depth + 1
+            except Exception as e:
+                print(f"Error in get_node_depth for node {node}: {str(e)}")
+                return 0  # Return safe default
 
-        # Generate the appropriate diagram
-        if diagram_type == 'ast':
-            fig = DiagramGenerator.generate_ast(G, metadata)
-            title = "Abstract Syntax Tree (AST)"
-        elif diagram_type == 'cfg':
-            fig = DiagramGenerator.generate_cfg(G, metadata)
-            title = "Control Flow Graph (CFG)"
-        elif diagram_type == 'ddg':
-            fig = DiagramGenerator.generate_ddg(G, metadata)
-            title = "Data Dependency Graph (DDG)"
-        else:
-            raise ValueError(f"Unknown diagram type: {diagram_type}")
+        # Calculate depths for all nodes with error handling
+        try:
+            node_depths = {}
+            for node in list(G.nodes()):  # Convert to list to avoid modification during iteration
+                try:
+                    if G.has_node(node):  # Verify node still exists
+                        node_depths[node] = get_node_depth(G, node)
+                    else:
+                        node_depths[node] = 0
+                except Exception as e:
+                    print(f"Error calculating depth for node {node}: {str(e)}")
+                    node_depths[node] = 0  # Default to 0 for problematic nodes
+            
+            max_depth = max(node_depths.values()) if node_depths else 0
+        except Exception as e:
+            print(f"Error in depth calculation: {str(e)}")
+            # Fallback to simple layout if depth calculation fails
+            node_depths = {node: 0 for node in G.nodes()}
+            max_depth = 0
 
-        # Convert plot to base64 string
-        img_data = io.BytesIO()
-        fig.savefig(img_data, format='png', bbox_inches='tight')
-        img_data.seek(0)
-        plt.close(fig)
+        # Use spring layout with custom parameters for better distribution
+        try:
+            if len(G.nodes()) > 1:
+                pos = nx.spring_layout(
+                    G,
+                    k=25.0,  # Large spacing between nodes
+                    iterations=1000,  # More iterations for better distribution
+                    scale=15.0,  # Large scale for overall spacing
+                    weight=None,  # Ignore edge weights
+                    seed=seed  # Use our consistent seed
+                )
+            else:
+                # For single node or empty graph, use simple circular layout
+                pos = nx.circular_layout(G, scale=10.0)
+        except Exception as e:
+            print(f"Error in spring layout: {str(e)}")
+            # Fallback to simpler layout if spring layout fails
+            try:
+                pos = nx.shell_layout(G, scale=10.0)
+            except:
+                # Last resort: manual positioning
+                pos = {node: [0.5, 0.5] for node in G.nodes()}
 
-        graph_url = base64.b64encode(img_data.getvalue()).decode()
-        return f"data:image/png;base64,{graph_url}", title
-
+        # Adjust y-coordinates based on depth with error handling
+        for node in list(pos.keys()):  # Convert to list to avoid modification during iteration
+            try:
+                if node not in G.nodes():  # Skip if node no longer exists
+                    continue
+                    
+                depth = node_depths.get(node, 0)  # Use get() with default value
+                if max_depth > 0:  # Avoid division by zero
+                    pos[node][1] = 1.0 - (depth / (max_depth + 1)) * 2
+                else:
+                    pos[node][1] = 0.5  # Center nodes vertically if no depth info
+                
+                # Add minimal controlled randomness to x-coordinate
+                if max_depth > 0:
+                    pos[node][0] *= (1 + 0.05 * (depth / max_depth))  # Reduced randomness factor
+            except Exception as e:
+                print(f"Error adjusting position for node {node}: {str(e)}")
+                # Provide safe default position if adjustment fails
+                pos[node] = [0.5, 0.5]
+        
+        # Enhanced node styling with error handling
+        node_colors = []
+        node_sizes = []
+        node_labels = {}
+        edge_colors = []
+        edge_styles = []
+        
+        try:
+            # Process nodes with comprehensive error handling
+            for node in G.nodes():
+                try:
+                    node_type = G.nodes[node].get('type', 'default')
+                    node_colors.append(DiagramGenerator._get_node_color(node_type))
+                    
+                    # Determine node size based on type and connections
+                    size_factor = 1000  # Base size
+                    if node_type in ['Module', 'ClassDef', 'ClassDeclaration']:
+                        size_factor = 2000
+                    elif node_type in ['FunctionDef', 'MethodDeclaration']:
+                        size_factor = 1500
+                    node_sizes.append(size_factor)
+                    
+                    # Create safe node labels
+                    label = str(G.nodes[node].get('value', '')).replace('"', '').replace("'", "")
+                    if len(label) > 20:  # Truncate long labels
+                        label = label[:17] + "..."
+                    node_labels[node] = label
+                except Exception as e:
+                    print(f"Error processing node {node}: {str(e)}")
+                    node_colors.append('#CCCCCC')  # Default gray
+                    node_sizes.append(1000)  # Default size
+                    node_labels[node] = str(node)[:10]  # Safe truncated label
+            
+            # Process edges with error handling
+            for edge in G.edges():
+                try:
+                    edge_colors.append('#666666')  # Consistent edge color
+                    edge_styles.append('-')  # Solid line style
+                except Exception as e:
+                    print(f"Error processing edge {edge}: {str(e)}")
+                    edge_colors.append('#CCCCCC')  # Default edge color
+                    edge_styles.append(':')  # Dotted line for error cases
+            
+            # Clear any existing plots
+            plt.clf()
+            
+            # Create figure with white background
+            fig = plt.figure(figsize=(12, 8), facecolor='white')
+            ax = fig.add_subplot(1, 1, 1)
+            ax.set_facecolor('white')
+            
+            # Draw the graph with safe defaults
+            if not pos:  # If position calculation failed
+                pos = nx.spring_layout(G)  # Fallback layout
+            
+            # Draw nodes with error handling
+            try:
+                nx.draw_networkx_nodes(G, pos, 
+                                     node_color=node_colors if node_colors else '#CCCCCC',
+                                     node_size=node_sizes if node_sizes else 1000)
+            except Exception as e:
+                print(f"Error drawing nodes: {str(e)}")
+                # Fallback to simple node drawing
+                nx.draw_networkx_nodes(G, pos, node_color='#CCCCCC', node_size=1000)
+            
+            # Draw edges with error handling
+            try:
+                nx.draw_networkx_edges(G, pos, 
+                                     edge_color=edge_colors if edge_colors else '#666666',
+                                     style=edge_styles if edge_styles else '-',
+                                     arrows=True, arrowsize=20)
+            except Exception as e:
+                print(f"Error drawing edges: {str(e)}")
+                # Fallback to simple edge drawing
+                nx.draw_networkx_edges(G, pos, edge_color='#666666')
+            
+            # Draw labels with error handling
+            try:
+                nx.draw_networkx_labels(G, pos, node_labels,
+                                      font_size=8,
+                                      font_family='sans-serif')
+            except Exception as e:
+                print(f"Error drawing labels: {str(e)}")
+                # Fallback to simple labels
+                nx.draw_networkx_labels(G, pos, {n: str(n)[:10] for n in G.nodes()})
+            
+            # Remove axes
+            plt.axis('off')
+            
+        except Exception as e:
+            print(f"Critical error in graph drawing: {str(e)}")
+            # Create a minimal fallback visualization
+            plt.clf()
+            fig = plt.figure(figsize=(8, 6), facecolor='white')
+            ax = fig.add_subplot(1, 1, 1)
+            ax.text(0.5, 0.5, f"Error generating visualization:\n{str(e)}", 
+                   horizontalalignment='center', verticalalignment='center')
+            ax.axis('off')
+        
+        # Save to buffer
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='svg', bbox_inches='tight', dpi=150, 
+                   pad_inches=0.5, facecolor='white', edgecolor='none')
+        plt.close()
+        
+        # Encode to base64
+        svg_data = buffer.getvalue().decode('utf-8')
+        svg_base64 = base64.b64encode(svg_data.encode('utf-8')).decode('utf-8')
+        
+        return svg_base64, 'Code Visualization', metadata
+    
     except Exception as e:
-        plt.close('all')  # Clean up any open figures
-        raise ValueError(f"Visualization failed: {str(e)}")
+        # Comprehensive error handling
+        plt.close('all')
+        error_metadata = {
+            'parse_error': str(e),
+            'total_nodes': 0,
+            'language': language,
+            'max_depth_reached': False
+        }
+        
+        # Create an error visualization
+        plt.figure(figsize=(10, 6))
+        plt.text(0.5, 0.5, f"Visualization Error:\n{str(e)}", 
+                 horizontalalignment='center', 
+                 verticalalignment='center', 
+                 color='red')
+        plt.axis('off')
+        
+        # Save to buffer
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='svg', bbox_inches='tight')
+        plt.close()
+        
+        # Encode to base64
+        svg_data = buffer.getvalue().decode('utf-8')
+        svg_base64 = base64.b64encode(svg_data.encode('utf-8')).decode('utf-8')
+        
+        return svg_base64, 'Visualization Error', error_metadata
