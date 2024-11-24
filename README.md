@@ -63,4 +63,4 @@ python web_application/backend.py
 MIT License
 
 ## Contact
-Joshua Ludolf - joshua.ludolf@example.com
+Joshua Ludolf - Jludo01@jaguar.tamu.edu (or use Discussions tab of this repository)
