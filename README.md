@@ -16,24 +16,8 @@ SillyVisualizer is an interactive code visualization tool that generates Abstrac
 ## Prerequisites
 - Python 3.8+
 - pip (Python package manager)
-- Graphviz (system-level dependency)
 
 ## Installation
-
-### System Dependencies
-#### Windows
-1. Install Graphviz from official website: https://graphviz.org/download/
-2. Add Graphviz to system PATH
-
-#### macOS
-```bash
-brew install graphviz
-```
-
-#### Linux
-```bash
-sudo apt-get install graphviz
-```
 
 ### Python Dependencies
 ```bash
