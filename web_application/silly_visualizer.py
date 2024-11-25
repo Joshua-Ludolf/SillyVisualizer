@@ -283,7 +283,7 @@ class DiagramGenerator:
         """Generate AST with hierarchical layout."""
         try:
             # Create hierarchical layout
-            pos = nx.spring_layout(G, k=2)
+            pos = nx.spring_layout(G, k=3.0)
             
             # Adjust y-coordinates based on node depth
             root_nodes = [n for n in G.nodes() if G.in_degree(n) == 0]
@@ -300,10 +300,10 @@ class DiagramGenerator:
                         if node in pos:
                             pos[node][1] = 1 - (levels[node] / max_depth)
 
-            plt.figure(figsize=(12, 8), facecolor='white')
+            plt.figure(figsize=(14, 10), facecolor='white')
             
             # Draw edges as straight lines
-            nx.draw_networkx_edges(G, pos, edge_color='gray', 
+            nx.draw_networkx_edges(G, pos, edge_color='#2c3e50', 
                                  arrows=True, arrowsize=15,
                                  connectionstyle='arc3,rad=0')
 
@@ -321,7 +321,7 @@ class DiagramGenerator:
                 node_colors.append(DiagramGenerator._get_node_color(node_type))
 
             nx.draw_networkx_nodes(G, pos, node_color=node_colors, 
-                                 node_size=node_sizes, alpha=0.9)
+                                 node_size=node_sizes, node_shape=shape)
 
             # Add labels
             labels = {node: G.nodes[node].get('value', '') for node in G.nodes()}
@@ -349,7 +349,7 @@ class DiagramGenerator:
             # Use layout better suited for control flow
             pos = nx.kamada_kawai_layout(G)
             
-            plt.figure(figsize=(12, 8), facecolor='white')
+            plt.figure(figsize=(14, 10), facecolor='white')
             
             # Draw different types of edges
             edge_styles = {'condition': ('red', '--'), 
@@ -406,7 +406,9 @@ class DiagramGenerator:
 
             # Add labels
             labels = {node: G.nodes[node].get('value', '') for node in G.nodes()}
-            nx.draw_networkx_labels(G, pos, labels, font_size=8)
+            nx.draw_networkx_labels(G, pos, labels, font_size=8,bbox=dict(facecolor='white',
+                               edgecolor='none',
+                               alpha=0.7))
 
             plt.axis('off')
             
@@ -428,9 +430,9 @@ class DiagramGenerator:
         """Generate Data Dependency Graph with emphasis on data flow."""
         try:
             # Use circular layout for data dependency visualization
-            pos = nx.circular_layout(G)
+            pos = nx.circular_layout(G, scale=2)
             
-            plt.figure(figsize=(12, 8), facecolor='white')
+            plt.figure(figsize=(14, 10), facecolor='white')
             
             # Draw edges with dependency labels
             edge_labels = {}
@@ -440,7 +442,7 @@ class DiagramGenerator:
                 
                 # Draw curved arrows for dependencies
                 nx.draw_networkx_edges(G, pos, edgelist=[(u, v)],
-                                     edge_color='#2980b9',
+                                     edge_color='#8e44ad',
                                      arrows=True,
                                      arrowsize=20,
                                      arrowstyle='->',
