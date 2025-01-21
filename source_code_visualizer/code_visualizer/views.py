@@ -423,8 +423,13 @@ def upload_code(request):
                 "error": f"Syntax error in {language} code: {str(e)}"
             }, status=400)
         except Exception as e:
+            # Log the detailed exception message
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error processing {language} code: {str(e)}", exc_info=True)
+            # Return a generic error message to the user
             return JsonResponse({
-                "error": f"Error processing {language} code: {str(e)}"
+                "error": "An internal error has occurred while processing the code."
             }, status=500)
     
     return render(request, 'code_visualizer/upload.html')
