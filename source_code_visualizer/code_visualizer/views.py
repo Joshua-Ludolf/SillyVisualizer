@@ -6,6 +6,7 @@ import javalang
 import networkx as nx
 import graphviz
 import os
+import logging
 
 def parse_python_ast(code):
     """Generate Abstract Syntax Tree for Python code."""
@@ -13,7 +14,10 @@ def parse_python_ast(code):
         tree = ast.parse(code)
         return _convert_ast_to_graph(tree)
     except SyntaxError as e:
-        return {"error": str(e)}
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Syntax error in Python code: {str(e)}", exc_info=True)
+        return {"error": "Syntax error in Python code."}
 
 def parse_java_ast(code):
     """Generate Abstract Syntax Tree for Java code."""
@@ -23,7 +27,10 @@ def parse_java_ast(code):
         tree = parser.parse()
         return _convert_java_ast_to_graph(tree)
     except Exception as e:
-        return {"error": str(e)}
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error processing Java code: {str(e)}", exc_info=True)
+        return {"error": "An internal error has occurred while processing the Java code."}
 
 def generate_control_flow_graph(code, language):
     """Generate Control Flow Graph for given code."""
