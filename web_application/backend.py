@@ -13,7 +13,6 @@ import numpy as np
 import io
 import base64
 import graphviz
-import plotly.graph_objs as go
 
 matplotlib.use('Agg')  # Use Agg backend to prevent GUI issues
 
@@ -120,47 +119,13 @@ def visualize_code():
         if diagram_type not in ['ast', 'cfg', 'ddg']:
             diagram_type = 'ast'
         
-        # Generate visualization
+        # Generate visualization using specialized diagram functions
         try:
-            # Create a NetworkX graph from the code
-            parser = SourceCodeParser()
-            G, metadata = parser.parse(code, language)
-            
-            # Convert NetworkX graph to D3.js format
-            nodes = []
-            links = []
-            
-            # Process nodes
-            for node in G.nodes():
-                node_data = G.nodes[node]
-                nodes.append({
-                    'id': str(node),
-                    'label': str(node),
-                    'type': node_data.get('type', 'default'),
-                    'color': _get_node_color(node_data.get('type', 'default')),
-                    'value': node_data.get('value', '')
-                })
-            
-            # Process edges
-            for source, target in G.edges():
-                links.append({
-                    'source': str(source),
-                    'target': str(target)
-                })
-            
-            # Generate title based on diagram type
-            title_map = {
-                'ast': 'Abstract Syntax Tree',
-                'cfg': 'Control Flow Graph',
-                'ddg': 'Data Dependency Graph'
-            }
-            title = title_map.get(diagram_type, 'Code Visualization')
+            # Use the specialized visualization function that calls the right method
+            svg_base64, title, metadata = generate_visualization(code, language, diagram_type)
             
             return jsonify({
-                'graph_data': {
-                    'nodes': nodes,
-                    'links': links
-                },
+                'svg_data': svg_base64,
                 'title': title,
                 'language': language,
                 'diagram_type': diagram_type,
@@ -303,8 +268,8 @@ def _generate_graph_image(G: nx.DiGraph) -> str:
     for edge in G.edges():
         dot.edge(str(edge[0]), str(edge[1]), style='curved')
 
-    # Render to SVG with UTF-8 encoding
-    svg_data = dot.pipe(format='svg', encoding='utf-8')
+    # Render to SVG as bytes (no encoding)
+    svg_data = dot.pipe(format='svg')
     
     # Encode to base64
     return base64.b64encode(svg_data).decode('utf-8')
@@ -325,11 +290,13 @@ def get_code_stats(code: str, language: str) -> dict:
             stats["classes"] = len([node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)])
         elif language == 'java':
             import javalang
+            from javalang.tree import MethodDeclaration, ClassDeclaration
             tree = javalang.parse.parse(code)
-            stats["functions"] = sum(1 for path, node in tree if isinstance(node, javalang.tree.MethodDeclaration))
-            stats["classes"] = sum(1 for path, node in tree if isinstance(node, javalang.tree.ClassDeclaration))
+            stats["functions"] = sum(1 for _, node in tree.filter(MethodDeclaration))
+            stats["classes"] = sum(1 for _, node in tree.filter(ClassDeclaration))
     except Exception as e:
-        stats["parse_error"] = str(e)
+        # Optionally, log the error or handle it as needed, but do not add a string to the stats dict
+        pass
 
     return stats
 

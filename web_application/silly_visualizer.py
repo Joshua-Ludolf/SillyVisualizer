@@ -23,7 +23,7 @@ class ASTNode:
         children (List[ASTNode]): A list of child AST nodes.
         lineno (int, optional): The line number in the source code where this node is found. Defaults to None.
     """
-    def __init__(self, type: str, value: str, children: List['ASTNode'], lineno: int = None):
+    def __init__(self, type: str, value: str, children: List['ASTNode'], lineno: int | None = None):
         self.type = type
         self.value = value
         self.children = children
@@ -82,7 +82,7 @@ class SourceCodeParser:
                         metadata['parse_error'] = str(e)
                         return G, metadata
                 
-                def add_node(node, parent=None, depth: int = 0, visited: set = None):
+                def add_node(node, parent=None, depth: int = 0, visited: set | None = None):
                     # Prevent infinite recursion
                     if visited is None:
                         visited = set()
@@ -149,7 +149,7 @@ class SourceCodeParser:
                     metadata['parse_error'] = str(e)
                     return G, metadata
                 
-                def add_java_node(node, parent=None, depth: int = 0, visited: set = None):
+                def add_java_node(node, parent=None, depth: int = 0, visited: set | None = None):
                     # Prevent infinite recursion
                     if visited is None:
                         visited = set()
@@ -198,8 +198,13 @@ class SourceCodeParser:
                         print(f"Error processing Java child node: {child_error}")
                 
                 # Start parsing from the root
-                for type_declaration in tree.types:
-                    add_java_node(type_declaration)
+                try:
+                    # Try to access types attribute
+                    for type_declaration in tree.types:  # type: ignore
+                        add_java_node(type_declaration)
+                except AttributeError:
+                    # Fallback if tree structure is different
+                    add_java_node(tree)
                 
                 metadata['total_nodes'] = len(G.nodes())
 
@@ -282,32 +287,48 @@ class DiagramGenerator:
     def generate_ast(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
         """Generate AST with hierarchical layout."""
         try:
-            # Create hierarchical layout
-            pos = nx.spring_layout(G, k=3.0)
+            # Ensure graph is not empty
+            if len(G.nodes()) == 0:
+                G.add_node("Empty AST", type="placeholder", value="No nodes found")
             
-            # Adjust y-coordinates based on node depth
+            # Create hierarchical layout for AST
+            try:
+                pos = nx.spring_layout(G, k=3.0, iterations=50)
+            except Exception as e:
+                print(f"Spring layout failed: {e}")
+                # Fallback to simpler layout
+                try:
+                    pos = nx.circular_layout(G)
+                except Exception:
+                    pos = {node: [0.5, 0.5] for node in G.nodes()}
+            
+            # Adjust y-coordinates based on node depth for tree structure
             root_nodes = [n for n in G.nodes() if G.in_degree(n) == 0]
             for root in root_nodes:
-                bfs_edges = list(nx.bfs_edges(G, root))
-                levels = {root: 0}
-                for u, v in bfs_edges:
-                    levels[v] = levels[u] + 1
-                
-                # Normalize depths
-                max_depth = max(levels.values()) if levels else 0
-                if max_depth > 0:
-                    for node in levels:
-                        if node in pos:
-                            pos[node][1] = 1 - (levels[node] / max_depth)
+                try:
+                    bfs_edges = list(nx.bfs_edges(G, root))
+                    levels = {root: 0}
+                    for u, v in bfs_edges:
+                        levels[v] = levels[u] + 1
+                    
+                    # Normalize depths
+                    max_depth = max(levels.values()) if levels else 0
+                    if max_depth > 0:
+                        for node in levels:
+                            if node in pos:
+                                pos[node][1] = 1 - (levels[node] / max_depth)
+                except Exception:
+                    pass  # Continue with spring layout if hierarchy fails
 
             plt.figure(figsize=(14, 10), facecolor='white')
             
-            # Draw edges as straight lines
+            # Draw edges as tree branches (straight lines)
             nx.draw_networkx_edges(G, pos, edge_color='#2c3e50', 
                                  arrows=True, arrowsize=15,
-                                 connectionstyle='arc3,rad=0')
+                                 connectionstyle='arc3,rad=0',
+                                 width=1.5)
 
-            # Draw nodes with type-based colors and sizes
+            # Draw nodes with type-based colors and sizes (circular for AST)
             node_colors = []
             node_sizes = []
             for node in G.nodes():
@@ -320,12 +341,18 @@ class DiagramGenerator:
                     node_sizes.append(1000)
                 node_colors.append(DiagramGenerator._get_node_color(node_type))
 
-            nx.draw_networkx_nodes(G, pos, node_color=node_colors, 
-                                 node_size=node_sizes, node_shape=shape)
+            # Use circular nodes for AST - draw nodes individually
+            for i, node in enumerate(G.nodes()):
+                nx.draw_networkx_nodes(G, pos, 
+                                     nodelist=[node],
+                                     node_color=node_colors[i] if i < len(node_colors) else '#95A5A6', 
+                                     node_size=node_sizes[i] if i < len(node_sizes) else 1000, 
+                                     node_shape='o',
+                                     edgecolors='black', linewidths=1)
 
             # Add labels
             labels = {node: G.nodes[node].get('value', '') for node in G.nodes()}
-            nx.draw_networkx_labels(G, pos, labels, font_size=8)
+            nx.draw_networkx_labels(G, pos, labels, font_size=8, font_weight='bold')
 
             plt.axis('off')
             
@@ -344,78 +371,135 @@ class DiagramGenerator:
 
     @staticmethod
     def generate_cfg(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
-        """Generate Control Flow Graph with traditional style."""
+        """Generate Control Flow Graph with flowchart-style layout and distinct styling."""
         try:
-            # Use layout better suited for control flow
-            pos = nx.kamada_kawai_layout(G)
+            # Ensure graph is not empty
+            if len(G.nodes()) == 0:
+                G.add_node("Empty CFG", type="placeholder", value="No control flow found")
             
-            plt.figure(figsize=(14, 10), facecolor='white')
+            # Create a simplified CFG-focused graph
+            cfg_graph = nx.DiGraph()
             
-            # Draw different types of edges
-            edge_styles = {'condition': ('red', '--'), 
-                         'loop': ('blue', ':'),
-                         'normal': ('black', '-')}
-            
-            for (u, v) in G.edges():
-                edge_type = G.edges[u, v].get('type', '').lower()
-                if 'condition' in edge_type:
-                    color, style = edge_styles['condition']
-                elif 'loop' in edge_type:
-                    color, style = edge_styles['loop']
-                else:
-                    color, style = edge_styles['normal']
-                
-                nx.draw_networkx_edges(G, pos, edgelist=[(u, v)],
-                                     edge_color=color,
-                                     style=style,
-                                     arrows=True,
-                                     arrowsize=20,
-                                     arrowstyle='->',
-                                     connectionstyle='arc3,rad=0.2')
-
-            # Draw nodes as rectangles with light background
-            node_shapes = []
-            node_colors = []
-            node_sizes = []
-            
+            # Filter and transform nodes for control flow emphasis
+            control_flow_nodes = []
             for node in G.nodes():
                 node_type = G.nodes[node].get('type', '').lower()
-                if 'condition' in node_type:
-                    node_shapes.append('d')  # diamond for conditions
-                    node_colors.append('lightblue')
-                    node_sizes.append(2000)
-                elif 'loop' in node_type:
-                    node_shapes.append('s')  # square for loops
-                    node_colors.append('lightgreen')
-                    node_sizes.append(1800)
+                node_value = G.nodes[node].get('value', '')
+                
+                # Focus on control flow elements
+                if any(cf in node_type for cf in ['if', 'for', 'while', 'functiondef', 'module', 'return']):
+                    control_flow_nodes.append(node)
+                    cfg_graph.add_node(node, **G.nodes[node])
+            
+            # Add edges between control flow nodes
+            for node in control_flow_nodes:
+                for successor in G.successors(node):
+                    if successor in control_flow_nodes:
+                        cfg_graph.add_edge(node, successor, **G.edges[node, successor])
+            
+            # Use the CFG graph for layout
+            target_graph = cfg_graph if len(cfg_graph.nodes()) > 0 else G
+            
+            # Use layout better suited for control flow (top-down)
+            try:
+                pos = nx.kamada_kawai_layout(target_graph)
+            except ImportError:
+                try:
+                    # Hierarchical layout for control flow
+                    pos = nx.spring_layout(target_graph, k=5.0, iterations=100)
+                except Exception:
+                    pos = nx.shell_layout(target_graph)
+            
+            plt.figure(figsize=(16, 12), facecolor='white')
+            plt.suptitle('Control Flow Graph', fontsize=16, fontweight='bold', color='#2c3e50')
+            
+            # Draw different types of edges with very distinct styles
+            edge_styles = {
+                'condition': ('#e74c3c', '--', 3),  # Thick red dashed for conditions
+                'loop': ('#3498db', ':', 4),        # Thick blue dotted for loops  
+                'normal': ('#2c3e50', '-', 2)       # Medium dark solid for normal flow
+            }
+            
+            for (u, v) in target_graph.edges():
+                edge_type = target_graph.edges[u, v].get('type', '').lower()
+                u_type = str(target_graph.nodes[u].get('type', '')).lower()
+                
+                if 'if' in u_type or 'condition' in edge_type:
+                    color, style, width = edge_styles['condition']
+                elif any(loop_word in u_type for loop_word in ['for', 'while']) or 'loop' in edge_type:
+                    color, style, width = edge_styles['loop']
                 else:
-                    node_shapes.append('o')  # circle for other nodes
-                    node_colors.append('white')
-                    node_sizes.append(1500)
+                    color, style, width = edge_styles['normal']
+                
+                nx.draw_networkx_edges(target_graph, pos, edgelist=[(u, v)],
+                                     edge_color=color,
+                                     style=style,
+                                     width=width,
+                                     arrows=True,
+                                     arrowsize=25,
+                                     arrowstyle='->',
+                                     connectionstyle='arc3,rad=0.15')
 
-            # Draw nodes with different shapes
-            for shape in set(node_shapes):
-                node_list = [node for i, node in enumerate(G.nodes()) if node_shapes[i] == shape]
-                if node_list:
-                    nx.draw_networkx_nodes(G, pos,
-                                         nodelist=node_list,
-                                         node_color=[c for i, c in enumerate(node_colors) if node_shapes[i] == shape],
-                                         node_size=[s for i, s in enumerate(node_sizes) if node_shapes[i] == shape],
-                                         node_shape=shape,
-                                         edgecolors='black')
+            # Draw nodes with very distinct shapes for control flow
+            condition_nodes = []
+            loop_nodes = []
+            function_nodes = []
+            regular_nodes = []
+            
+            for node in target_graph.nodes():
+                node_type = target_graph.nodes[node].get('type', '').lower()
+                if 'if' in node_type:
+                    condition_nodes.append(node)
+                elif any(loop in node_type for loop in ['for', 'while']):
+                    loop_nodes.append(node)
+                elif 'function' in node_type or 'module' in node_type:
+                    function_nodes.append(node)
+                else:
+                    regular_nodes.append(node)
 
-            # Add labels
-            labels = {node: G.nodes[node].get('value', '') for node in G.nodes()}
-            nx.draw_networkx_labels(G, pos, labels, font_size=8,bbox=dict(facecolor='white',
-                               edgecolor='none',
-                               alpha=0.7))
+            # Draw condition nodes as large yellow diamonds
+            if condition_nodes:
+                nx.draw_networkx_nodes(target_graph, pos, nodelist=condition_nodes,
+                                     node_color='#f1c40f', node_size=2500,
+                                     node_shape='D', edgecolors='#f39c12', linewidths=3)
+            
+            # Draw loop nodes as large blue squares
+            if loop_nodes:
+                nx.draw_networkx_nodes(target_graph, pos, nodelist=loop_nodes,
+                                     node_color='#3498db', node_size=2200,
+                                     node_shape='s', edgecolors='#2980b9', linewidths=3)
+            
+            # Draw function nodes as large green circles
+            if function_nodes:
+                nx.draw_networkx_nodes(target_graph, pos, nodelist=function_nodes,
+                                     node_color='#2ecc71', node_size=2000,
+                                     node_shape='o', edgecolors='#27ae60', linewidths=3)
+            
+            # Draw regular nodes as smaller gray circles
+            if regular_nodes:
+                nx.draw_networkx_nodes(target_graph, pos, nodelist=regular_nodes,
+                                     node_color='#bdc3c7', node_size=1400,
+                                     node_shape='o', edgecolors='#95a5a6', linewidths=2)
+
+            # Add labels with background for better readability
+            labels = {}
+            for node in target_graph.nodes():
+                value = target_graph.nodes[node].get('value', str(node))
+                if len(str(value)) > 15:
+                    value = str(value)[:12] + "..."
+                labels[node] = value
+                
+            nx.draw_networkx_labels(target_graph, pos, labels, font_size=10, font_weight='bold',
+                                  bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
+                                           edgecolor='gray', alpha=0.9))
 
             plt.axis('off')
+            plt.tight_layout()
             
             # Save to buffer
             buffer = io.BytesIO()
-            plt.savefig(buffer, format='svg', bbox_inches='tight', 
-                       dpi=150, pad_inches=0.5, facecolor='white')
+            plt.savefig(buffer, format='svg', bbox_inches='tight', dpi=150, 
+                       pad_inches=0.5, facecolor='white')
             plt.close()
             
             svg_data = buffer.getvalue().decode('utf-8')
@@ -427,67 +511,164 @@ class DiagramGenerator:
 
     @staticmethod
     def generate_ddg(G: nx.DiGraph, metadata: Dict[str, Any]) -> str:
-        """Generate Data Dependency Graph with emphasis on data flow."""
+        """Generate Data Dependency Graph with emphasis on data flow and variable relationships."""
         try:
-            # Use circular layout for data dependency visualization
-            pos = nx.circular_layout(G, scale=2)
+            # Ensure graph is not empty
+            if len(G.nodes()) == 0:
+                G.add_node("Empty DDG", type="placeholder", value="No data dependencies found")
             
-            plt.figure(figsize=(14, 10), facecolor='white')
+            # Create a data-focused graph
+            ddg_graph = nx.DiGraph()
             
-            # Draw edges with dependency labels
-            edge_labels = {}
-            for (u, v) in G.edges():
-                dep_type = G.edges[u, v].get('dependency_type', '')
-                edge_labels[(u, v)] = dep_type
+            # Filter nodes for data dependency focus
+            data_nodes = []
+            for node in G.nodes():
+                node_type = G.nodes[node].get('type', '').lower()
+                node_value = str(G.nodes[node].get('value', '')).lower()
                 
-                # Draw curved arrows for dependencies
-                nx.draw_networkx_edges(G, pos, edgelist=[(u, v)],
+                # Focus on data-related elements: variables, assignments, operations
+                if any(data_type in node_type for data_type in ['name', 'attribute', 'constant', 'assign', 'binop', 'call', 'return']):
+                    data_nodes.append(node)
+                    ddg_graph.add_node(node, **G.nodes[node])
+            
+            # Add edges representing data dependencies
+            for node in data_nodes:
+                for successor in G.successors(node):
+                    if successor in data_nodes:
+                        ddg_graph.add_edge(node, successor, dependency_type='data_flow')
+            
+            # Use the DDG graph for layout
+            target_graph = ddg_graph if len(ddg_graph.nodes()) > 0 else G
+            
+            # Use radial/circular layout to emphasize data relationships
+            try:
+                pos = nx.circular_layout(target_graph, scale=3)
+            except Exception:
+                pos = nx.spring_layout(target_graph, k=4.0, iterations=100)
+            
+            plt.figure(figsize=(16, 12), facecolor='#f8f9fa')  # Light background
+            plt.suptitle('Data Dependency Graph', fontsize=16, fontweight='bold', color='#8e44ad')
+            
+            # Analyze nodes for data types with more granular classification
+            variable_nodes = []
+            operation_nodes = []
+            assignment_nodes = []
+            constant_nodes = []
+            function_call_nodes = []
+            
+            for node in target_graph.nodes():
+                node_type = target_graph.nodes[node].get('type', '').lower()
+                node_value = str(target_graph.nodes[node].get('value', '')).lower()
+                
+                if 'name' in node_type and 'assign' not in node_type:
+                    variable_nodes.append(node)
+                elif 'constant' in node_type or node_value.isdigit():
+                    constant_nodes.append(node)
+                elif 'assign' in node_type:
+                    assignment_nodes.append(node)
+                elif 'call' in node_type:
+                    function_call_nodes.append(node)
+                elif any(op_type in node_type for op_type in ['binop', 'unaryop', 'compare']):
+                    operation_nodes.append(node)
+                else:
+                    operation_nodes.append(node)  # Default classification
+            
+            # Draw edges with strong emphasis on data flow (thick purple arrows)
+            for (u, v) in target_graph.edges():
+                nx.draw_networkx_edges(target_graph, pos, edgelist=[(u, v)],
                                      edge_color='#8e44ad',
                                      arrows=True,
-                                     arrowsize=20,
+                                     arrowsize=30,
                                      arrowstyle='->',
-                                     connectionstyle='arc3,rad=0.3',
-                                     width=2)
+                                     connectionstyle='arc3,rad=0.4',
+                                     width=4,
+                                     alpha=0.7)
             
-            # Draw edge labels if they exist
-            if edge_labels:
-                nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=6)
-            
-            # Draw nodes with different styles based on type
-            var_nodes = []
-            op_nodes = []
-            for node in G.nodes():
-                if G.nodes[node].get('type') == 'variable':
-                    var_nodes.append(node)
-                else:
-                    op_nodes.append(node)
-            
-            # Draw variable nodes
-            if var_nodes:
-                nx.draw_networkx_nodes(G, pos,
-                                     nodelist=var_nodes,
+            # Draw variable nodes as large red hexagons
+            if variable_nodes:
+                nx.draw_networkx_nodes(target_graph, pos,
+                                     nodelist=variable_nodes,
                                      node_color='#e74c3c',
-                                     node_size=2000,
-                                     node_shape='o')
+                                     node_size=2400,
+                                     node_shape='h',  # hexagon for variables
+                                     edgecolors='#c0392b',
+                                     linewidths=4)
             
-            # Draw operation nodes
-            if op_nodes:
-                nx.draw_networkx_nodes(G, pos,
-                                     nodelist=op_nodes,
+            # Draw constant nodes as small orange triangles
+            if constant_nodes:
+                nx.draw_networkx_nodes(target_graph, pos,
+                                     nodelist=constant_nodes,
+                                     node_color='#f39c12',
+                                     node_size=1600,
+                                     node_shape='^',  # triangle for constants
+                                     edgecolors='#e67e22',
+                                     linewidths=3)
+            
+            # Draw assignment nodes as large blue diamonds
+            if assignment_nodes:
+                nx.draw_networkx_nodes(target_graph, pos,
+                                     nodelist=assignment_nodes,
+                                     node_color='#3498db',
+                                     node_size=2200,
+                                     node_shape='D',  # diamond for assignments
+                                     edgecolors='#2980b9',
+                                     linewidths=4)
+            
+            # Draw function call nodes as green pentagons (star shape)
+            if function_call_nodes:
+                nx.draw_networkx_nodes(target_graph, pos,
+                                     nodelist=function_call_nodes,
                                      node_color='#2ecc71',
-                                     node_size=1500,
-                                     node_shape='s')
+                                     node_size=2000,
+                                     node_shape='*',  # star for function calls
+                                     edgecolors='#27ae60',
+                                     linewidths=3)
             
-            # Add labels
-            labels = {node: G.nodes[node].get('value', '') for node in G.nodes()}
-            nx.draw_networkx_labels(G, pos, labels, font_size=8)
+            # Draw operation nodes as medium purple squares
+            if operation_nodes:
+                nx.draw_networkx_nodes(target_graph, pos,
+                                     nodelist=operation_nodes,
+                                     node_color='#9b59b6',
+                                     node_size=1800,
+                                     node_shape='s',  # square for operations
+                                     edgecolors='#8e44ad',
+                                     linewidths=3)
             
+            # Add labels with better contrast and data-focused styling
+            labels = {}
+            for node in target_graph.nodes():
+                value = target_graph.nodes[node].get('value', str(node))
+                if len(str(value)) > 12:
+                    value = str(value)[:9] + "..."
+                labels[node] = value
+                
+            nx.draw_networkx_labels(target_graph, pos, labels, font_size=11, font_weight='bold',
+                                  bbox=dict(boxstyle='round,pad=0.4', facecolor='white',
+                                           edgecolor='#8e44ad', alpha=0.95, linewidth=2))
+            
+            # Add a legend for data dependency graph
+            from matplotlib.lines import Line2D
+            legend_elements = [
+                Line2D([0], [0], marker='h', color='w', markerfacecolor='#e74c3c', 
+                          markersize=15, label='Variables', markeredgecolor='#c0392b', markeredgewidth=2),
+                Line2D([0], [0], marker='^', color='w', markerfacecolor='#f39c12', 
+                          markersize=12, label='Constants', markeredgecolor='#e67e22', markeredgewidth=2),
+                Line2D([0], [0], marker='D', color='w', markerfacecolor='#3498db', 
+                          markersize=13, label='Assignments', markeredgecolor='#2980b9', markeredgewidth=2),
+                Line2D([0], [0], marker='*', color='w', markerfacecolor='#2ecc71', 
+                          markersize=15, label='Function Calls', markeredgecolor='#27ae60', markeredgewidth=2),
+                Line2D([0], [0], marker='s', color='w', markerfacecolor='#9b59b6', 
+                          markersize=12, label='Operations', markeredgecolor='#8e44ad', markeredgewidth=2)
+            ]
+            plt.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(0, 1))
+
             plt.axis('off')
+            plt.tight_layout()
             
             # Save to buffer
             buffer = io.BytesIO()
-            plt.savefig(buffer, format='svg', bbox_inches='tight', 
-                       dpi=150, pad_inches=0.5, facecolor='white')
+            plt.savefig(buffer, format='svg', bbox_inches='tight', dpi=150, 
+                       pad_inches=0.5, facecolor='#f8f9fa')
             plt.close()
             
             svg_data = buffer.getvalue().decode('utf-8')
@@ -570,9 +751,7 @@ class DiagramGenerator:
                 pos = nx.spring_layout(
                     G,
                     k=25.0,  # Large spacing between nodes
-                    iterations=1000,  # More iterations for better distribution
-                    scale=15.0,  # Large scale for overall spacing
-                    weight=None  # Ignore edge weights
+                    iterations=1000  # More iterations for better distribution
                 )
             else:
                 # For single node or empty graph, use simple circular layout
@@ -604,7 +783,8 @@ class DiagramGenerator:
             except Exception as e:
                 print(f"Error adjusting position for node {node}: {str(e)}")
                 # Provide safe default position if adjustment fails
-                pos[node] = [0.5, 0.5]
+                if isinstance(pos, dict):
+                    pos[node] = [0.5, 0.5]
         
         # Enhanced node styling with error handling
         node_colors = []
@@ -661,11 +841,25 @@ class DiagramGenerator:
             if not pos:  # If position calculation failed
                 pos = nx.spring_layout(G)  # Fallback layout
             
-            # Draw nodes with error handling
+            # Draw nodes with error handling - draw individually
             try:
-                nx.draw_networkx_nodes(G, pos, 
-                                     node_color=node_colors if node_colors else '#CCCCCC',
-                                     node_size=node_sizes if node_sizes else 1000)
+                # Ensure we have valid node colors and sizes
+                if node_colors and len(node_colors) == len(G.nodes()):
+                    final_node_colors = node_colors
+                else:
+                    final_node_colors = ['#CCCCCC'] * len(G.nodes())
+                
+                if node_sizes and len(node_sizes) == len(G.nodes()):
+                    final_node_sizes = node_sizes
+                else:
+                    final_node_sizes = [1000] * len(G.nodes())
+                
+                # Draw nodes individually to avoid list parameter issues
+                for i, node in enumerate(G.nodes()):
+                    nx.draw_networkx_nodes(G, pos, 
+                                         nodelist=[node],
+                                         node_color=final_node_colors[i] if i < len(final_node_colors) else '#CCCCCC',
+                                         node_size=final_node_sizes[i] if i < len(final_node_sizes) else 1000)
             except Exception as e:
                 print(f"Error drawing nodes: {str(e)}")
                 # Fallback to simple node drawing
@@ -673,10 +867,25 @@ class DiagramGenerator:
             
             # Draw edges with error handling
             try:
-                nx.draw_networkx_edges(G, pos, 
-                                     edge_color=edge_colors if edge_colors else '#666666',
-                                     style=edge_styles if edge_styles else '-',
-                                     arrows=True, arrowsize=20)
+                if edge_colors and len(edge_colors) == len(G.edges()):
+                    # Draw edges individually with their respective colors
+                    for i, edge in enumerate(G.edges()):
+                        try:
+                            color = edge_colors[i] if i < len(edge_colors) else '#666666'
+                            style = edge_styles[i] if edge_styles and i < len(edge_styles) else '-'
+                            nx.draw_networkx_edges(G, pos, edgelist=[edge],
+                                                 edge_color=color,
+                                                 style=style,
+                                                 arrows=True, arrowsize=20)
+                        except Exception as edge_error:
+                            print(f"Error drawing edge {edge}: {str(edge_error)}")
+                            continue
+                else:
+                    # Use single color for all edges
+                    nx.draw_networkx_edges(G, pos, 
+                                         edge_color='#666666',
+                                         style='-',
+                                         arrows=True, arrowsize=20)
             except Exception as e:
                 print(f"Error drawing edges: {str(e)}")
                 # Fallback to simple edge drawing
@@ -748,219 +957,22 @@ def generate_visualization(code: str, language: str, diagram_type: str) -> Tuple
         # Parse the code and generate graph
         G, metadata = SourceCodeParser.parse(code, language)
         
-        # Generate the diagram based on type
-        plt.figure(figsize=(14, 12), dpi=150)
+        # Generate the appropriate diagram based on type
+        if diagram_type.lower() == 'ast':
+            svg_base64 = DiagramGenerator.generate_ast(G, metadata)
+            title = f"Abstract Syntax Tree ({language.title()})"
+        elif diagram_type.lower() == 'cfg':
+            svg_base64 = DiagramGenerator.generate_cfg(G, metadata)
+            title = f"Control Flow Graph ({language.title()})"
+        elif diagram_type.lower() == 'ddg':
+            svg_base64 = DiagramGenerator.generate_ddg(G, metadata)
+            title = f"Data Dependency Graph ({language.title()})"
+        else:
+            # Fallback to AST if unknown type
+            svg_base64 = DiagramGenerator.generate_ast(G, metadata)
+            title = f"Code Visualization ({language.title()})"
         
-        # Ensure graph is not empty
-        if len(G.nodes()) == 0:
-            # Create a placeholder graph if no nodes exist
-            G.add_node("Empty Graph")
-        
-        # Calculate node depths from root nodes (nodes with no incoming edges)
-        def get_node_depth(G, node, visited=None):
-            """Calculate the depth of a node in the graph."""
-            if visited is None:
-                visited = set()
-            
-            # Handle cycles and already visited nodes
-            if node in visited:
-                return 0
-            visited.add(node)
-            
-            try:
-                # Get predecessors safely with error handling
-                predecessors = list(G.predecessors(node)) if G.has_node(node) else []
-                if not predecessors:  # If node has no predecessors (root node)
-                    return 0
-                    
-                # Calculate max depth from predecessors
-                max_depth = 0
-                for pred in predecessors:
-                    if pred not in visited and G.has_node(pred):  # Check if predecessor exists
-                        try:
-                            depth = get_node_depth(G, pred, visited.copy())  # Use copy to prevent modifying original set
-                            max_depth = max(max_depth, depth)
-                        except Exception as e:
-                            print(f"Error in depth calculation for predecessor {pred}: {str(e)}")
-                            continue  # Skip problematic predecessors
-                return max_depth + 1
-            except Exception as e:
-                print(f"Error in get_node_depth for node {node}: {str(e)}")
-                return 0  # Return safe default
-
-        # Calculate depths for all nodes with error handling
-        try:
-            node_depths = {}
-            for node in list(G.nodes()):  # Convert to list to avoid modification during iteration
-                try:
-                    if G.has_node(node):  # Verify node still exists
-                        node_depths[node] = get_node_depth(G, node)
-                    else:
-                        node_depths[node] = 0
-                except Exception as e:
-                    print(f"Error calculating depth for node {node}: {str(e)}")
-                    node_depths[node] = 0  # Default to 0 for problematic nodes
-            
-            max_depth = max(node_depths.values()) if node_depths else 0
-        except Exception as e:
-            print(f"Error in depth calculation: {str(e)}")
-            # Fallback to simple layout if depth calculation fails
-            node_depths = {node: 0 for node in G.nodes()}
-            max_depth = 0
-
-        # Use spring layout with custom parameters for better distribution
-        try:
-            if len(G.nodes()) > 1:
-                pos = nx.spring_layout(
-                    G,
-                    k=25.0,  # Large spacing between nodes
-                    iterations=1000,  # More iterations for better distribution
-                    scale=15.0,  # Large scale for overall spacing
-                    weight=None,  # Ignore edge weights
-                    seed=seed  # Use our consistent seed
-                )
-            else:
-                # For single node or empty graph, use simple circular layout
-                pos = nx.circular_layout(G, scale=10.0)
-        except Exception as e:
-            print(f"Error in spring layout: {str(e)}")
-            # Fallback to simpler layout if spring layout fails
-            try:
-                pos = nx.shell_layout(G, scale=10.0)
-            except:
-                # Last resort: manual positioning
-                pos = {node: [0.5, 0.5] for node in G.nodes()}
-
-        # Adjust y-coordinates based on depth with error handling
-        for node in list(pos.keys()):  # Convert to list to avoid modification during iteration
-            try:
-                if node not in G.nodes():  # Skip if node no longer exists
-                    continue
-                    
-                depth = node_depths.get(node, 0)  # Use get() with default value
-                if max_depth > 0:  # Avoid division by zero
-                    pos[node][1] = 1.0 - (depth / (max_depth + 1)) * 2
-                else:
-                    pos[node][1] = 0.5  # Center nodes vertically if no depth info
-                
-                # Add minimal controlled randomness to x-coordinate
-                if max_depth > 0:
-                    pos[node][0] *= (1 + 0.05 * (depth / max_depth))  # Reduced randomness factor
-            except Exception as e:
-                print(f"Error adjusting position for node {node}: {str(e)}")
-                # Provide safe default position if adjustment fails
-                pos[node] = [0.5, 0.5]
-        
-        # Enhanced node styling with error handling
-        node_colors = []
-        node_sizes = []
-        node_labels = {}
-        edge_colors = []
-        edge_styles = []
-        
-        try:
-            # Process nodes with comprehensive error handling
-            for node in G.nodes():
-                try:
-                    node_type = G.nodes[node].get('type', 'default')
-                    node_colors.append(DiagramGenerator._get_node_color(node_type))
-                    
-                    # Determine node size based on type and connections
-                    size_factor = 1000  # Base size
-                    if node_type in ['Module', 'ClassDef', 'ClassDeclaration']:
-                        size_factor = 2000
-                    elif node_type in ['FunctionDef', 'MethodDeclaration']:
-                        size_factor = 1500
-                    node_sizes.append(size_factor)
-                    
-                    # Create safe node labels
-                    label = str(G.nodes[node].get('value', '')).replace('"', '').replace("'", "")
-                    if len(label) > 20:  # Truncate long labels
-                        label = label[:17] + "..."
-                    node_labels[node] = label
-                except Exception as e:
-                    print(f"Error processing node {node}: {str(e)}")
-                    node_colors.append('#CCCCCC')  # Default gray
-                    node_sizes.append(1000)  # Default size
-                    node_labels[node] = str(node)[:10]  # Safe truncated label
-            
-            # Process edges with error handling
-            for edge in G.edges():
-                try:
-                    edge_colors.append('#666666')  # Consistent edge color
-                    edge_styles.append('-')  # Solid line style
-                except Exception as e:
-                    print(f"Error processing edge {edge}: {str(e)}")
-                    edge_colors.append('#CCCCCC')  # Default edge color
-                    edge_styles.append(':')  # Dotted line for error cases
-            
-            # Clear any existing plots
-            plt.clf()
-            
-            # Create figure with white background
-            fig = plt.figure(figsize=(12, 8), facecolor='white')
-            ax = fig.add_subplot(1, 1, 1)
-            ax.set_facecolor('white')
-            
-            # Draw the graph with safe defaults
-            if not pos:  # If position calculation failed
-                pos = nx.spring_layout(G)  # Fallback layout
-            
-            # Draw nodes with error handling
-            try:
-                nx.draw_networkx_nodes(G, pos, 
-                                     node_color=node_colors if node_colors else '#CCCCCC',
-                                     node_size=node_sizes if node_sizes else 1000)
-            except Exception as e:
-                print(f"Error drawing nodes: {str(e)}")
-                # Fallback to simple node drawing
-                nx.draw_networkx_nodes(G, pos, node_color='#CCCCCC', node_size=1000)
-            
-            # Draw edges with error handling
-            try:
-                nx.draw_networkx_edges(G, pos, 
-                                     edge_color=edge_colors if edge_colors else '#666666',
-                                     style=edge_styles if edge_styles else '-',
-                                     arrows=True, arrowsize=20)
-            except Exception as e:
-                print(f"Error drawing edges: {str(e)}")
-                # Fallback to simple edge drawing
-                nx.draw_networkx_edges(G, pos, edge_color='#666666')
-            
-            # Draw labels with error handling
-            try:
-                nx.draw_networkx_labels(G, pos, node_labels,
-                                      font_size=8,
-                                      font_family='sans-serif')
-            except Exception as e:
-                print(f"Error drawing labels: {str(e)}")
-                # Fallback to simple labels
-                nx.draw_networkx_labels(G, pos, {n: str(n)[:10] for n in G.nodes()})
-            
-            # Remove axes
-            plt.axis('off')
-            
-        except Exception as e:
-            print(f"Critical error in graph drawing: {str(e)}")
-            # Create a minimal fallback visualization
-            plt.clf()
-            fig = plt.figure(figsize=(8, 6), facecolor='white')
-            ax = fig.add_subplot(1, 1, 1)
-            ax.text(0.5, 0.5, f"Error generating visualization:\n{str(e)}", 
-                   horizontalalignment='center', verticalalignment='center')
-            ax.axis('off')
-        
-        # Save to buffer
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='svg', bbox_inches='tight', dpi=150, 
-                   pad_inches=0.5, facecolor='white', edgecolor='none')
-        plt.close()
-        
-        # Encode to base64
-        svg_data = buffer.getvalue().decode('utf-8')
-        svg_base64 = base64.b64encode(svg_data.encode('utf-8')).decode('utf-8')
-        
-        return svg_base64, 'Code Visualization', metadata
+        return svg_base64, title, metadata
     
     except Exception as e:
         # Comprehensive error handling

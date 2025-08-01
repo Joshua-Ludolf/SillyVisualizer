@@ -414,21 +414,38 @@ $(document).ready(function() {
                     );
                 } else {
                     try {
-                        console.log('Graph data:', response.graph_data);  // Debug log
+                        console.log('SVG data received:', response.svg_data ? 'Yes' : 'No');  // Debug log
                         
-                        if (!response.graph_data || !response.graph_data.nodes || !response.graph_data.links) {
-                            throw new Error('Invalid graph data structure');
+                        if (!response.svg_data) {
+                            throw new Error('No SVG data received');
                         }
                         
                         // Clear previous visualization
                         $('#result').empty();
                         
-                        // Create a new instance and initialize it
-                        window.graphVisualizer = new GraphVisualizer('result');
-                        window.graphVisualizer.initialize();
+                        // Decode base64 SVG and display it
+                        const svgContent = atob(response.svg_data);
                         
-                        // Update with the new graph data
-                        window.graphVisualizer.update(response.graph_data);
+                        // Create a container for the SVG with proper styling
+                        const $svgContainer = $('<div>', {
+                            class: 'svg-container w-full h-full flex items-center justify-center bg-white rounded-lg border',
+                            css: {
+                                minHeight: '500px',
+                                overflow: 'auto'
+                            }
+                        });
+                        
+                        // Add the SVG content
+                        $svgContainer.html(svgContent);
+                        
+                        // Add title
+                        const $title = $('<h3>', {
+                            class: 'text-lg font-semibold text-gray-800 mb-4 text-center',
+                            text: response.title || 'Code Visualization'
+                        });
+                        
+                        // Add both to result container
+                        $('#result').append($title).append($svgContainer);
                         
                         $('#saveAsPng').removeClass('hidden');
                     } catch (err) {
