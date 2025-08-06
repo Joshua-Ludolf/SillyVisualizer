@@ -1,11 +1,42 @@
 // Init panzoom
 
 $(document).ready(function() {
-    // Initialize graph visualizer
+    // Initialize graph visualizer but don't show controls yet
     window.graphVisualizer = new GraphVisualizer('result');
     window.graphVisualizer.initialize();
+    
+    // Hide all controls initially
+    hideVisualizationControls();
 
     let panzoomInstance = null;
+    
+    // Helper functions for controlling visualization UI
+    function hideVisualizationControls() {
+        // Hide all graph visualizer controls if they exist
+        if (window.graphVisualizer && window.graphVisualizer.hideControls) {
+            window.graphVisualizer.hideControls();
+        }
+        
+        // Clear the result container but keep save button visible
+        $('#result').html(`
+            <div class="flex items-center justify-center h-96 text-gray-500">
+                <div class="text-center">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 002 2v10m-6 0a2 2 0 002 2h2a2 2 0 00-2-2m0 0V5a2 2 0 012-2h2a2 2 0 002 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                    </svg>
+                    <h3 class="mt-2 text-sm font-medium text-gray-900">No Visualization</h3>
+                    <p class="mt-1 text-sm text-gray-500">Click "Visualize Code" to generate a graph visualization</p>
+                </div>
+            </div>
+        `);
+    }
+    
+    function showVisualizationControls() {
+        // Show all graph visualizer controls if they exist
+        if (window.graphVisualizer && window.graphVisualizer.showControls) {
+            window.graphVisualizer.showControls();
+        }
+    }
 
     // Tab switching
     $('.input-method-tab').click(function() {
@@ -345,6 +376,11 @@ $(document).ready(function() {
         $('#codeStats').addClass('hidden');
         $('#saveAsPng').addClass('hidden');
 
+        // Clear graph visualizer controls and data
+        if (window.graphVisualizer) {
+            window.graphVisualizer.clear();
+        }
+
         // Clear any existing panzoom instance
         if (panzoomInstance) {
             panzoomInstance.dispose();
@@ -414,45 +450,42 @@ $(document).ready(function() {
                     );
                 } else {
                     try {
-                        console.log('SVG data received:', response.svg_data ? 'Yes' : 'No');  // Debug log
+                        console.log('Graph data received:', response.graph_data ? 'Yes' : 'No');  // Debug log
                         
-                        if (!response.svg_data) {
-                            throw new Error('No SVG data received');
+                        if (!response.graph_data) {
+                            throw new Error('No graph data received');
                         }
                         
                         // Clear previous visualization
                         $('#result').empty();
                         
-                        // Decode base64 SVG and display it
-                        const svgContent = atob(response.svg_data);
+                        // Re-initialize the graph visualizer after clearing
+                        window.graphVisualizer.initialize();
                         
-                        // Create a container for the SVG with proper styling
-                        const $svgContainer = $('<div>', {
-                            class: 'svg-container w-full h-full flex items-center justify-center bg-white rounded-lg border',
-                            css: {
-                                minHeight: '500px',
-                                overflow: 'auto'
-                            }
-                        });
+                        // Show visualization controls now that we have data
+                        showVisualizationControls();
                         
-                        // Add the SVG content
-                        $svgContainer.html(svgContent);
+                        // Update the graph visualizer with new D3.js data
+                        window.graphVisualizer.update(response.graph_data);
                         
-                        // Add title
-                        const $title = $('<h3>', {
-                            class: 'text-lg font-semibold text-gray-800 mb-4 text-center',
-                            text: response.title || 'Code Visualization'
-                        });
+                        // Update title in the visualization section
+                        $('.visualization-title').text(response.title || 'Code Visualization');
                         
-                        // Add both to result container
-                        $('#result').append($title).append($svgContainer);
+                        // Update diagram info
+                        const infoText = `${response.diagram_type.toUpperCase()} • ${response.language} • ${response.node_count} nodes • ${response.edge_count} connections`;
+                        if ($('.visualization-info').length) {
+                            $('.visualization-info').text(infoText);
+                        } else {
+                            $('.visualization-title').after(`<p class="visualization-info text-sm text-gray-600 mt-1">${infoText}</p>`);
+                        }
                         
-                        $('#saveAsPng').removeClass('hidden');
-                    } catch (err) {
-                        console.error('Visualization error:', err);  // Debug log
+                        console.log('Interactive SVG visualization loaded successfully');
+                        
+                    } catch (error) {
+                        console.error('Error processing response:', error);
                         $('#result').html(
                             `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                                Visualization error: ${err.message}
+                                Error: ${error.message}
                             </div>`
                         );
                     }

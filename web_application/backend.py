@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_from_directory, json
 from werkzeug.utils import secure_filename
 import os
-from silly_visualizer import generate_visualization, SourceCodeParser
+from silly_visualizer import SourceCodeParser, DiagramGenerator
 import ast
 import re
 import threading
@@ -30,6 +30,478 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def networkx_to_interactive_svg(graph, metadata=None, title="Graph Visualization"):
+    """
+    Convert NetworkX graph to interactive SVG with embedded JavaScript.
+    
+    Args:
+        graph: NetworkX graph object
+        metadata: Optional metadata dictionary
+        title: Title for the visualization
+    
+    Returns:
+        str: Interactive SVG as string
+    """
+    import math
+    
+    print(f"DEBUG: Creating SVG for graph with {len(graph.nodes())} nodes and {len(graph.edges())} edges")
+    
+    # SVG dimensions - make larger for many nodes
+    num_nodes = len(graph.nodes())
+    if num_nodes > 100:
+        width, height = 2000, 1500
+    else:
+        width, height = 1000, 800
+    margin = 50
+    
+    # Calculate node positions using a simple layout to avoid scipy dependency
+    import math
+    
+    num_nodes = len(graph.nodes())
+    if num_nodes == 0:
+        centered_pos = {}
+    elif num_nodes == 1:
+        # Single node at center
+        node = list(graph.nodes())[0]
+        centered_pos = {node: (width/2, height/2)}
+    elif num_nodes <= 12:
+        # Circular layout for small number of nodes
+        centered_pos = {}
+        radius = min(width, height) * 0.3  # 30% of the smaller dimension
+        center_x, center_y = width/2, height/2
+        
+        nodes = list(graph.nodes())
+        for i, node in enumerate(nodes):
+            angle = 2 * math.pi * i / num_nodes
+            x = center_x + radius * math.cos(angle)
+            y = center_y + radius * math.sin(angle)
+            centered_pos[node] = (x, y)
+    else:
+        # Grid layout for larger number of nodes
+        centered_pos = {}
+        nodes = list(graph.nodes())
+        cols = math.ceil(math.sqrt(num_nodes))
+        rows = math.ceil(num_nodes / cols)
+        
+        cell_width = (width - 100) / cols  # Leave 50px margin on each side
+        cell_height = (height - 100) / rows
+        
+        # Ensure minimum spacing between nodes
+        min_spacing = 40 if num_nodes > 500 else 50
+        if cell_width < min_spacing or cell_height < min_spacing:
+            # Increase canvas size if nodes would be too close
+            if cell_width < min_spacing:
+                width = cols * min_spacing + 100
+                cell_width = min_spacing
+            if cell_height < min_spacing:
+                height = rows * min_spacing + 100
+                cell_height = min_spacing
+        
+        for i, node in enumerate(nodes):
+            col = i % cols
+            row = i // cols
+            x = 50 + (col + 0.5) * cell_width
+            y = 50 + (row + 0.5) * cell_height
+            centered_pos[node] = (x, y)
+    
+    print(f"DEBUG: Positioned {len(centered_pos)} nodes")
+    if centered_pos:
+        sample_node = list(centered_pos.keys())[0]
+        print(f"DEBUG: Sample position - Node {sample_node}: {centered_pos[sample_node]}")
+    
+    # Start building SVG
+    svg_parts = []
+    svg_parts.append(f'''<?xml version="1.0" encoding="UTF-8"?>
+<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg" 
+     viewBox="0 0 {width} {height}" style="background: white; border: 1px solid #ddd;">
+     
+<defs>
+    <!-- Gradients for node types -->''')
+    
+    # Add gradients for different node types
+    node_types = {
+        'Module': '#2C3E50',
+        'ClassDef': '#3498DB', 
+        'FunctionDef': '#2ECC71',
+        'Name': '#F39C12',
+        'Attribute': '#9B59B6',
+        'Call': '#16A085',
+        'Control': '#E74C3C',
+        'default': '#95A5A6'
+    }
+    
+    for node_type, color in node_types.items():
+        svg_parts.append(f'''
+    <radialGradient id="grad-{node_type}" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" style="stop-color:{color};stop-opacity:0.8" />
+        <stop offset="100%" style="stop-color:{color};stop-opacity:1" />
+    </radialGradient>''')
+    
+    # Arrow marker for edges
+    svg_parts.append('''
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+            refX="9" refY="3.5" orient="auto">
+        <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+    </marker>
+</defs>
+
+<!-- Main graph group with zoom/pan transform -->
+<g id="graph-content" transform="translate(0,0) scale(1)">''')
+    
+    # Add edges first (so they appear behind nodes)
+    for source, target in graph.edges():
+        edge_data = graph.edges[source, target]
+        x1, y1 = centered_pos[source]
+        x2, y2 = centered_pos[target]
+        
+        edge_type = edge_data.get('type', 'default')
+        stroke_color = '#666'
+        if edge_type == 'inheritance':
+            stroke_color = '#e74c3c'
+        elif edge_type == 'composition':
+            stroke_color = '#3498db'
+        elif edge_type == 'dependency':
+            stroke_color = '#f39c12'
+            
+        svg_parts.append(f'''
+    <line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" 
+          stroke="{stroke_color}" stroke-width="2" 
+          marker-end="url(#arrowhead)" opacity="0.8"
+          class="edge" data-source="{source}" data-target="{target}"/>''')
+    
+    # Add nodes
+    nodes_added = 0
+    for node_id in graph.nodes():
+        node_data = graph.nodes[node_id]
+        x, y = centered_pos[node_id]
+        
+        node_type = node_data.get('type', 'default')
+        # Map node type to color
+        mapped_type = 'default'
+        if node_type in ['ClassDef', 'ClassDeclaration']:
+            mapped_type = 'ClassDef'
+        elif node_type in ['FunctionDef', 'MethodDeclaration']:
+            mapped_type = 'FunctionDef'
+        elif node_type in node_types:
+            mapped_type = node_type
+            
+        value = node_data.get('value', str(node_id))
+        lineno = node_data.get('lineno', '')
+        
+        # Node radius based on type and number of nodes
+        base_radius = 15 if num_nodes > 500 else 20 if num_nodes > 100 else 25
+        radius = base_radius
+        if mapped_type == 'Module':
+            radius = base_radius + 5
+        elif mapped_type in ['ClassDef', 'FunctionDef']:
+            radius = base_radius + 2
+            
+        # Create node group
+        svg_parts.append(f'''
+    <g class="node" data-id="{node_id}" data-type="{node_type}" 
+       transform="translate({x},{y})" style="cursor: pointer;">
+        <circle r="{radius}" fill="url(#grad-{mapped_type})" 
+                stroke="white" stroke-width="2" class="node-circle"
+                onmouseover="highlightNode(this)" onmouseout="unhighlightNode(this)"/>''')
+        
+        # Add text label if it's an important node type
+        if mapped_type in ['Module', 'ClassDef', 'FunctionDef']:
+            display_text = value[:12] + '...' if len(value) > 12 else value
+            svg_parts.append(f'''
+        <text text-anchor="middle" dy="{radius + 15}" fill="#333" 
+              font-size="10" font-weight="bold" class="node-label"
+              pointer-events="none">{display_text}</text>''')
+        
+        # Tooltip data
+        tooltip_text = f"Type: {node_type}\\nValue: {value}"
+        if lineno:
+            tooltip_text += f"\\nLine: {lineno}"
+            
+        svg_parts.append(f'''
+        <title>{tooltip_text}</title>
+    </g>''')
+        nodes_added += 1
+    
+    print(f"DEBUG: Added {nodes_added} nodes to SVG")
+    
+    svg_parts.append('''
+</g>
+
+<!-- Interactive controls -->
+<g id="controls" style="font-family: Arial, sans-serif;">
+    <!-- Zoom controls -->
+    <g id="zoom-controls" transform="translate(20, 20)">
+        <rect width="35" height="100" fill="rgba(255,255,255,0.9)" 
+              stroke="#ddd" rx="5" />
+        <text x="17.5" y="15" text-anchor="middle" font-size="10" fill="#666">Zoom</text>
+        
+        <!-- Zoom in button -->
+        <g class="zoom-btn" onclick="zoomIn()" style="cursor: pointer;">
+            <rect x="5" y="20" width="25" height="25" fill="white" 
+                  stroke="#ddd" rx="3" onmouseover="this.setAttribute('fill','#f0f0f0')"
+                  onmouseout="this.setAttribute('fill','white')"/>
+            <text x="17.5" y="37" text-anchor="middle" font-size="16" font-weight="bold">+</text>
+        </g>
+        
+        <!-- Zoom out button -->
+        <g class="zoom-btn" onclick="zoomOut()" style="cursor: pointer;">
+            <rect x="5" y="50" width="25" height="25" fill="white" 
+                  stroke="#ddd" rx="3" onmouseover="this.setAttribute('fill','#f0f0f0')"
+                  onmouseout="this.setAttribute('fill','white')"/>
+            <text x="17.5" y="67" text-anchor="middle" font-size="16" font-weight="bold">−</text>
+        </g>
+        
+        <!-- Reset button -->
+        <g class="zoom-btn" onclick="resetView()" style="cursor: pointer;">
+            <rect x="5" y="80" width="25" height="15" fill="white" 
+                  stroke="#ddd" rx="3" onmouseover="this.setAttribute('fill','#f0f0f0')"
+                  onmouseout="this.setAttribute('fill','white')"/>
+            <text x="17.5" y="90" text-anchor="middle" font-size="10">⌂</text>
+        </g>
+    </g>
+    
+    <!-- Legend -->
+    <g id="legend" transform="translate(20, 140)">
+        <rect width="120" height="140" fill="rgba(255,255,255,0.9)" 
+              stroke="#ddd" rx="5" />
+        <text x="60" y="15" text-anchor="middle" font-size="12" font-weight="bold">Legend</text>''')
+    
+    # Add legend items
+    legend_y = 30
+    for i, (node_type, color) in enumerate(list(node_types.items())[:6]):  # Show first 6 types
+        svg_parts.append(f'''
+        <circle cx="15" cy="{legend_y}" r="8" fill="{color}" stroke="white" stroke-width="1"/>
+        <text x="30" y="{legend_y + 4}" font-size="10" fill="#333">{node_type}</text>''')
+        legend_y += 20
+    
+    svg_parts.append('''
+    </g>
+</g>
+
+<script type="text/javascript"><![CDATA[
+    let currentScale = 1;
+    let currentX = 0;
+    let currentY = 0;
+    const minScale = 0.1;
+    const maxScale = 3;
+    
+    function updateTransform() {
+        const graphContent = document.getElementById('graph-content');
+        graphContent.setAttribute('transform', 
+            `translate(${currentX}, ${currentY}) scale(${currentScale})`);
+    }
+    
+    function zoomIn() {
+        if (currentScale < maxScale) {
+            currentScale *= 1.2;
+            updateTransform();
+        }
+    }
+    
+    function zoomOut() {
+        if (currentScale > minScale) {
+            currentScale /= 1.2;
+            updateTransform();
+        }
+    }
+    
+    function resetView() {
+        currentScale = 1;
+        currentX = 0;
+        currentY = 0;
+        updateTransform();
+    }
+    
+    function highlightNode(element) {
+        const nodeGroup = element.parentNode;
+        const nodeId = nodeGroup.getAttribute('data-id');
+        
+        // Highlight the node
+        element.setAttribute('stroke', '#ffd700');
+        element.setAttribute('stroke-width', '4');
+        
+        // Highlight connected edges
+        const edges = document.querySelectorAll('.edge');
+        edges.forEach(edge => {
+            const source = edge.getAttribute('data-source');
+            const target = edge.getAttribute('data-target');
+            if (source === nodeId || target === nodeId) {
+                edge.setAttribute('stroke-width', '4');
+                edge.setAttribute('opacity', '1');
+            } else {
+                edge.setAttribute('opacity', '0.3');
+            }
+        });
+        
+        // Dim other nodes
+        const nodes = document.querySelectorAll('.node-circle');
+        nodes.forEach(node => {
+            if (node !== element) {
+                node.setAttribute('opacity', '0.5');
+            }
+        });
+    }
+    
+    function unhighlightNode(element) {
+        // Reset node highlighting
+        element.setAttribute('stroke', 'white');
+        element.setAttribute('stroke-width', '2');
+        
+        // Reset all edges
+        const edges = document.querySelectorAll('.edge');
+        edges.forEach(edge => {
+            edge.setAttribute('stroke-width', '2');
+            edge.setAttribute('opacity', '0.8');
+        });
+        
+        // Reset all nodes
+        const nodes = document.querySelectorAll('.node-circle');
+        nodes.forEach(node => {
+            node.setAttribute('opacity', '1');
+        });
+    }
+    
+    // Pan functionality
+    let isPanning = false;
+    let startX, startY;
+    
+    document.addEventListener('mousedown', function(e) {
+        if (e.target.tagName === 'svg' || e.target.id === 'graph-content') {
+            isPanning = true;
+            startX = e.clientX - currentX;
+            startY = e.clientY - currentY;
+            e.preventDefault();
+        }
+    });
+    
+    document.addEventListener('mousemove', function(e) {
+        if (isPanning) {
+            currentX = e.clientX - startX;
+            currentY = e.clientY - startY;
+            updateTransform();
+        }
+    });
+    
+    document.addEventListener('mouseup', function() {
+        isPanning = false;
+    });
+    
+    // Mouse wheel zoom
+    document.addEventListener('wheel', function(e) {
+        e.preventDefault();
+        if (e.deltaY < 0) {
+            zoomIn();
+        } else {
+            zoomOut();
+        }
+    });
+]]></script>
+
+</svg>''')
+    
+    return ''.join(svg_parts)
+
+
+def networkx_to_d3(graph, metadata=None):
+    """Convert NetworkX graph to D3.js compatible format."""
+    # Create nodes list
+    nodes = []
+    for node_id in graph.nodes():
+        node_data = graph.nodes[node_id]
+        nodes.append({
+            'id': str(node_id),
+            'label': node_data.get('value', str(node_id)),
+            'type': node_data.get('type', 'default'),
+            'value': node_data.get('value', ''),
+            'lineno': node_data.get('lineno'),
+            'details': node_data.get('details', ''),
+            'group': _get_node_group(node_data.get('type', 'default'))
+        })
+    
+    # Create links list
+    links = []
+    for source, target in graph.edges():
+        edge_data = graph.edges[source, target]
+        links.append({
+            'source': str(source),
+            'target': str(target),
+            'type': edge_data.get('type', 'default'),
+            'weight': edge_data.get('weight', 1),
+            'label': edge_data.get('label', '')
+        })
+    
+    return {
+        'nodes': nodes,
+        'links': links,
+        'metadata': metadata or {}
+    }
+
+
+def _get_node_group(node_type):
+    """Map node types to group numbers for D3.js visualization."""
+    type_groups = {
+        'Module': 1,
+        'ClassDef': 2,
+        'ClassDeclaration': 2,
+        'FunctionDef': 3,
+        'MethodDeclaration': 3,
+        'Name': 4,
+        'Attribute': 5,
+        'Call': 6,
+        'If': 7,
+        'For': 7,
+        'While': 7,
+        'Return': 8,
+        'Assign': 9,
+        'BinOp': 10,
+        'Compare': 10,
+        'Constant': 11,
+        'default': 0
+    }
+    return type_groups.get(node_type, 0)
+
+
+def _create_cfg_graph(original_graph):
+    """Create a Control Flow Graph by filtering relevant nodes."""
+    cfg_graph = nx.DiGraph()
+    
+    # Filter for control flow nodes
+    for node in original_graph.nodes():
+        node_type = original_graph.nodes[node].get('type', '').lower()
+        if any(cf in node_type for cf in ['if', 'for', 'while', 'functiondef', 'module', 'return', 'methoddeclaration', 'classdeclaration']):
+            cfg_graph.add_node(node, **original_graph.nodes[node])
+    
+    # Add edges between control flow nodes
+    for node in cfg_graph.nodes():
+        for successor in original_graph.successors(node):
+            if successor in cfg_graph.nodes():
+                edge_data = original_graph.edges.get((node, successor), {})
+                cfg_graph.add_edge(node, successor, **edge_data)
+    
+    return cfg_graph if len(cfg_graph.nodes()) > 0 else original_graph
+
+
+def _create_ddg_graph(original_graph):
+    """Create a Data Dependency Graph by filtering relevant nodes."""
+    ddg_graph = nx.DiGraph()
+    
+    # Filter for data dependency nodes
+    for node in original_graph.nodes():
+        node_type = original_graph.nodes[node].get('type', '').lower()
+        if any(data_type in node_type for data_type in ['name', 'attribute', 'constant', 'assign', 'binop', 'call', 'return']):
+            ddg_graph.add_node(node, **original_graph.nodes[node])
+    
+    # Add edges representing data dependencies
+    for node in ddg_graph.nodes():
+        for successor in original_graph.successors(node):
+            if successor in ddg_graph.nodes():
+                edge_data = original_graph.edges.get((node, successor), {})
+                edge_data['dependency_type'] = 'data_flow'
+                ddg_graph.add_edge(node, successor, **edge_data)
+    
+    return ddg_graph if len(ddg_graph.nodes()) > 0 else original_graph
 
 
 def detect_language(code):
@@ -121,18 +593,40 @@ def visualize_code():
         
         # Generate visualization using specialized diagram functions
         try:
-            # Use the specialized visualization function that calls the right method
-            svg_base64, title, metadata = generate_visualization(code, language, diagram_type)
+            # Parse the code first
+            graph, parse_metadata = SourceCodeParser.parse(code, language)
+            
+            # Generate the appropriate diagram type but get the graph data
+            if diagram_type == 'ast':
+                title = f"Abstract Syntax Tree ({language.title()})"
+                # For AST, use the original parsed graph
+                final_graph = graph
+            elif diagram_type == 'cfg':
+                title = f"Control Flow Graph ({language.title()})"
+                # Filter for control flow nodes
+                final_graph = _create_cfg_graph(graph)
+            elif diagram_type == 'ddg':
+                title = f"Data Dependency Graph ({language.title()})"
+                # Filter for data dependency nodes
+                final_graph = _create_ddg_graph(graph)
+            else:
+                title = f"Abstract Syntax Tree ({language.title()})"
+                final_graph = graph
+            
+            # Convert to D3.js format for SVG rendering
+            d3_data = networkx_to_d3(final_graph, parse_metadata)
             
             return jsonify({
-                'svg_data': svg_base64,
+                'graph_data': d3_data,
                 'title': title,
                 'language': language,
                 'diagram_type': diagram_type,
-                'parsing_metadata': metadata
+                'node_count': len(d3_data['nodes']),
+                'edge_count': len(d3_data['links'])
             })
         except Exception as viz_error:
             app.logger.error(f"Visualization generation error: {str(viz_error)}")
+            app.logger.error(f"Traceback: {traceback.format_exc()}")
             return jsonify({
                 'error': 'Visualization generation failed',
                 'details': str(viz_error)

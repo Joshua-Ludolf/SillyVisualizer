@@ -291,16 +291,62 @@ class DiagramGenerator:
             if len(G.nodes()) == 0:
                 G.add_node("Empty AST", type="placeholder", value="No nodes found")
             
-            # Create hierarchical layout for AST
+            # Dynamic scaling based on node count for better readability
+            node_count = len(G.nodes())
+            
+            # For very large graphs, filter to show only the most important nodes
+            if node_count > 150:
+                filtered_graph = nx.DiGraph()
+                important_types = ['Module', 'ClassDef', 'FunctionDef', 'ClassDeclaration', 'MethodDeclaration']
+                
+                # Add important nodes first
+                for node in G.nodes():
+                    node_type = G.nodes[node].get('type', '')
+                    if any(imp_type in node_type for imp_type in important_types):
+                        filtered_graph.add_node(node, **G.nodes[node])
+                
+                # Add their direct connections
+                for node in list(filtered_graph.nodes()):
+                    for successor in G.successors(node):
+                        if successor in G.nodes():
+                            filtered_graph.add_node(successor, **G.nodes[successor])
+                            filtered_graph.add_edge(node, successor, **G.edges.get((node, successor), {}))
+                    for predecessor in G.predecessors(node):
+                        if predecessor in G.nodes():
+                            filtered_graph.add_node(predecessor, **G.nodes[predecessor])
+                            filtered_graph.add_edge(predecessor, node, **G.edges.get((predecessor, node), {}))
+                
+                G = filtered_graph
+                node_count = len(G.nodes())
+                print(f"Filtered large AST from {len(list(G.nodes()))} to {node_count} nodes for better readability")
+            if node_count > 100:
+                k_value, scale_value, iterations = 25.0, 12, 800
+                min_dist = 3.0
+            elif node_count > 50:
+                k_value, scale_value, iterations = 20.0, 10, 600  
+                min_dist = 2.5
+            else:
+                k_value, scale_value, iterations = 15.0, 8, 500
+                min_dist = 2.0
+            
+            # Create hierarchical layout for AST with maximum spacing
             try:
-                pos = nx.spring_layout(G, k=3.0, iterations=50)
+                # Use dynamic spacing parameters based on graph size
+                pos = nx.spring_layout(G, k=k_value, iterations=iterations, scale=scale_value)
             except Exception as e:
                 print(f"Spring layout failed: {e}")
-                # Fallback to simpler layout
+                # Fallback to grid-based layout for maximum separation
                 try:
-                    pos = nx.circular_layout(G)
+                    import math
+                    nodes = list(G.nodes())
+                    grid_size = int(math.ceil(math.sqrt(len(nodes))))
+                    pos = {}
+                    for i, node in enumerate(nodes):
+                        x = (i % grid_size) * 2.0  # 2.0 spacing between grid positions
+                        y = (i // grid_size) * 2.0
+                        pos[node] = [x, y]
                 except Exception:
-                    pos = {node: [0.5, 0.5] for node in G.nodes()}
+                    pos = {node: [i*3.0, 0] for i, node in enumerate(G.nodes())}
             
             # Adjust y-coordinates based on node depth for tree structure
             root_nodes = [n for n in G.nodes() if G.in_degree(n) == 0]
@@ -311,16 +357,34 @@ class DiagramGenerator:
                     for u, v in bfs_edges:
                         levels[v] = levels[u] + 1
                     
-                    # Normalize depths
+                    # Normalize depths with much larger vertical spacing
                     max_depth = max(levels.values()) if levels else 0
                     if max_depth > 0:
                         for node in levels:
                             if node in pos:
-                                pos[node][1] = 1 - (levels[node] / max_depth)
+                                pos[node][1] = (max_depth - levels[node]) * 3.0  # 3x vertical spacing
                 except Exception:
                     pass  # Continue with spring layout if hierarchy fails
 
-            plt.figure(figsize=(14, 10), facecolor='white')
+            plt.figure(figsize=(30, 24), facecolor='white')  # Much larger figure size
+            
+            # Convert pos to mutable dict and apply aggressive node separation
+            pos = dict(pos)
+            # Use dynamic minimum distance based on graph size
+            # Apply multiple iterations of separation to really spread nodes out
+            for iteration in range(3):  # Multiple passes for better separation
+                for node1 in list(pos.keys()):
+                    for node2 in list(pos.keys()):
+                        if node1 != node2:
+                            x1, y1 = pos[node1]
+                            x2, y2 = pos[node2]
+                            distance = np.sqrt((x2-x1)**2 + (y2-y1)**2)
+                            if distance < min_dist and distance > 0:
+                                # Move nodes apart more aggressively
+                                angle = np.arctan2(y2-y1, x2-x1)
+                                separation = min_dist * 1.2  # 20% extra separation
+                                pos[node2] = [x1 + separation * np.cos(angle), 
+                                             y1 + separation * np.sin(angle)]
             
             # Draw edges as tree branches (straight lines)
             nx.draw_networkx_edges(G, pos, edge_color='#2c3e50', 
@@ -328,17 +392,17 @@ class DiagramGenerator:
                                  connectionstyle='arc3,rad=0',
                                  width=1.5)
 
-            # Draw nodes with type-based colors and sizes (circular for AST)
+            # Draw nodes with type-based colors and larger sizes for better readability
             node_colors = []
             node_sizes = []
             for node in G.nodes():
                 node_type = G.nodes[node].get('type', 'default')
                 if node_type in ['Module', 'ClassDef', 'ClassDeclaration']:
-                    node_sizes.append(2000)
+                    node_sizes.append(3000)  # Increased from 2000
                 elif node_type in ['FunctionDef', 'MethodDeclaration']:
-                    node_sizes.append(1500)
+                    node_sizes.append(2500)  # Increased from 1500
                 else:
-                    node_sizes.append(1000)
+                    node_sizes.append(2000)  # Increased from 1000
                 node_colors.append(DiagramGenerator._get_node_color(node_type))
 
             # Use circular nodes for AST - draw nodes individually
@@ -350,16 +414,16 @@ class DiagramGenerator:
                                      node_shape='o',
                                      edgecolors='black', linewidths=1)
 
-            # Add labels
+            # Add labels with larger font for better readability
             labels = {node: G.nodes[node].get('value', '') for node in G.nodes()}
-            nx.draw_networkx_labels(G, pos, labels, font_size=8, font_weight='bold')
+            nx.draw_networkx_labels(G, pos, labels, font_size=11, font_weight='bold')
 
             plt.axis('off')
             
-            # Save to buffer
+            # Save to buffer with increased padding for better spacing
             buffer = io.BytesIO()
             plt.savefig(buffer, format='svg', bbox_inches='tight', 
-                       dpi=150, pad_inches=0.5, facecolor='white')
+                       dpi=150, pad_inches=1.5, facecolor='white')  # Increased padding
             plt.close()
             
             svg_data = buffer.getvalue().decode('utf-8')
@@ -400,17 +464,54 @@ class DiagramGenerator:
             # Use the CFG graph for layout
             target_graph = cfg_graph if len(cfg_graph.nodes()) > 0 else G
             
-            # Use layout better suited for control flow (top-down)
+            # Dynamic scaling for CFG based on node count
+            node_count = len(target_graph.nodes())
+            if node_count > 80:
+                k_value, scale_value, iterations = 30.0, 12, 1000
+                min_dist = 3.5
+            elif node_count > 40:
+                k_value, scale_value, iterations = 25.0, 10, 800  
+                min_dist = 3.0
+            else:
+                k_value, scale_value, iterations = 20.0, 8, 600
+                min_dist = 2.5
+            
+            # Use layout better suited for control flow with dynamic spacing
             try:
-                pos = nx.kamada_kawai_layout(target_graph)
+                pos = nx.kamada_kawai_layout(target_graph, scale=scale_value)
             except ImportError:
                 try:
-                    # Hierarchical layout for control flow
-                    pos = nx.spring_layout(target_graph, k=5.0, iterations=100)
+                    # Hierarchical layout for control flow with dynamic spacing
+                    pos = nx.spring_layout(target_graph, k=k_value, iterations=iterations, scale=scale_value)
                 except Exception:
-                    pos = nx.shell_layout(target_graph)
+                    # Force-based grid layout as fallback
+                    import math
+                    nodes = list(target_graph.nodes())
+                    grid_size = int(math.ceil(math.sqrt(len(nodes))))
+                    pos = {}
+                    spacing = min_dist * 2  # Grid spacing based on minimum distance
+                    for i, node in enumerate(nodes):
+                        x = (i % grid_size) * spacing
+                        y = (i // grid_size) * spacing
+                        pos[node] = [x, y]
             
-            plt.figure(figsize=(16, 12), facecolor='white')
+            # Convert to mutable dict and add dynamic node separation
+            pos = dict(pos)
+            # Apply multiple aggressive separation passes
+            for iteration in range(4):  # Even more passes for CFG
+                for node1 in list(pos.keys()):
+                    for node2 in list(pos.keys()):
+                        if node1 != node2:
+                            x1, y1 = pos[node1]
+                            x2, y2 = pos[node2]
+                            distance = np.sqrt((x2-x1)**2 + (y2-y1)**2)
+                            if distance < min_dist and distance > 0:
+                                angle = np.arctan2(y2-y1, x2-x1)
+                                separation = min_dist * 1.5  # 50% extra separation
+                                pos[node2] = [x1 + separation * np.cos(angle), 
+                                             y1 + separation * np.sin(angle)]
+            
+            plt.figure(figsize=(32, 24), facecolor='white')  # Maximum size for CFG
             plt.suptitle('Control Flow Graph', fontsize=16, fontweight='bold', color='#2c3e50')
             
             # Draw different types of edges with very distinct styles
@@ -457,49 +558,49 @@ class DiagramGenerator:
                 else:
                     regular_nodes.append(node)
 
-            # Draw condition nodes as large yellow diamonds
+            # Draw condition nodes as extra large yellow diamonds
             if condition_nodes:
                 nx.draw_networkx_nodes(target_graph, pos, nodelist=condition_nodes,
-                                     node_color='#f1c40f', node_size=2500,
+                                     node_color='#f1c40f', node_size=4000,  # Increased from 2500
                                      node_shape='D', edgecolors='#f39c12', linewidths=3)
             
-            # Draw loop nodes as large blue squares
+            # Draw loop nodes as extra large blue squares
             if loop_nodes:
                 nx.draw_networkx_nodes(target_graph, pos, nodelist=loop_nodes,
-                                     node_color='#3498db', node_size=2200,
+                                     node_color='#3498db', node_size=3500,  # Increased from 2200
                                      node_shape='s', edgecolors='#2980b9', linewidths=3)
             
-            # Draw function nodes as large green circles
+            # Draw function nodes as extra large green circles
             if function_nodes:
                 nx.draw_networkx_nodes(target_graph, pos, nodelist=function_nodes,
-                                     node_color='#2ecc71', node_size=2000,
+                                     node_color='#2ecc71', node_size=3200,  # Increased from 2000
                                      node_shape='o', edgecolors='#27ae60', linewidths=3)
             
-            # Draw regular nodes as smaller gray circles
+            # Draw regular nodes as larger gray circles
             if regular_nodes:
                 nx.draw_networkx_nodes(target_graph, pos, nodelist=regular_nodes,
-                                     node_color='#bdc3c7', node_size=1400,
+                                     node_color='#bdc3c7', node_size=2400,  # Increased from 1400
                                      node_shape='o', edgecolors='#95a5a6', linewidths=2)
 
-            # Add labels with background for better readability
+            # Add labels with background for better readability and larger font
             labels = {}
             for node in target_graph.nodes():
                 value = target_graph.nodes[node].get('value', str(node))
-                if len(str(value)) > 15:
-                    value = str(value)[:12] + "..."
+                if len(str(value)) > 20:  # Allow longer labels
+                    value = str(value)[:17] + "..."
                 labels[node] = value
                 
-            nx.draw_networkx_labels(target_graph, pos, labels, font_size=10, font_weight='bold',
-                                  bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
-                                           edgecolor='gray', alpha=0.9))
+            nx.draw_networkx_labels(target_graph, pos, labels, font_size=12, font_weight='bold',
+                                  bbox=dict(boxstyle='round,pad=0.5', facecolor='white',
+                                           edgecolor='gray', alpha=0.95, linewidth=1.5))
 
             plt.axis('off')
             plt.tight_layout()
             
-            # Save to buffer
+            # Save to buffer with extra padding
             buffer = io.BytesIO()
             plt.savefig(buffer, format='svg', bbox_inches='tight', dpi=150, 
-                       pad_inches=0.5, facecolor='white')
+                       pad_inches=2.0, facecolor='white')  # More padding for CFG
             plt.close()
             
             svg_data = buffer.getvalue().decode('utf-8')
@@ -540,13 +641,41 @@ class DiagramGenerator:
             # Use the DDG graph for layout
             target_graph = ddg_graph if len(ddg_graph.nodes()) > 0 else G
             
-            # Use radial/circular layout to emphasize data relationships
-            try:
-                pos = nx.circular_layout(target_graph, scale=3)
-            except Exception:
-                pos = nx.spring_layout(target_graph, k=4.0, iterations=100)
+            # Dynamic scaling for DDG based on node count (most aggressive)
+            node_count = len(target_graph.nodes())
+            if node_count > 60:
+                k_value, scale_value, iterations = 35.0, 15, 1200
+                min_dist = 4.0
+            elif node_count > 30:
+                k_value, scale_value, iterations = 30.0, 12, 1000  
+                min_dist = 3.5
+            else:
+                k_value, scale_value, iterations = 25.0, 10, 800
+                min_dist = 3.0
             
-            plt.figure(figsize=(16, 12), facecolor='#f8f9fa')  # Light background
+            # Use radial/circular layout to emphasize data relationships with dynamic spacing
+            try:
+                pos = nx.circular_layout(target_graph, scale=scale_value)
+            except Exception:
+                pos = nx.spring_layout(target_graph, k=k_value, iterations=iterations, scale=scale_value)
+            
+            # Convert to mutable dict and add maximum node separation for DDG
+            pos = dict(pos)
+            # Apply most aggressive separation passes
+            for iteration in range(5):  # Maximum passes for DDG
+                for node1 in list(pos.keys()):
+                    for node2 in list(pos.keys()):
+                        if node1 != node2:
+                            x1, y1 = pos[node1]
+                            x2, y2 = pos[node2]
+                            distance = np.sqrt((x2-x1)**2 + (y2-y1)**2)
+                            if distance < min_dist and distance > 0:
+                                angle = np.arctan2(y2-y1, x2-x1)
+                                separation = min_dist * 1.8  # 80% extra separation
+                                pos[node2] = [x1 + separation * np.cos(angle), 
+                                             y1 + separation * np.sin(angle)]
+            
+            plt.figure(figsize=(36, 28), facecolor='#f8f9fa')  # Maximum figure for DDG
             plt.suptitle('Data Dependency Graph', fontsize=16, fontweight='bold', color='#8e44ad')
             
             # Analyze nodes for data types with more granular classification
@@ -584,52 +713,52 @@ class DiagramGenerator:
                                      width=4,
                                      alpha=0.7)
             
-            # Draw variable nodes as large red hexagons
+            # Draw variable nodes as extra large red hexagons
             if variable_nodes:
                 nx.draw_networkx_nodes(target_graph, pos,
                                      nodelist=variable_nodes,
                                      node_color='#e74c3c',
-                                     node_size=2400,
+                                     node_size=3600,  # Increased from 2400
                                      node_shape='h',  # hexagon for variables
                                      edgecolors='#c0392b',
                                      linewidths=4)
             
-            # Draw constant nodes as small orange triangles
+            # Draw constant nodes as larger orange triangles
             if constant_nodes:
                 nx.draw_networkx_nodes(target_graph, pos,
                                      nodelist=constant_nodes,
                                      node_color='#f39c12',
-                                     node_size=1600,
+                                     node_size=2800,  # Increased from 1600
                                      node_shape='^',  # triangle for constants
                                      edgecolors='#e67e22',
                                      linewidths=3)
             
-            # Draw assignment nodes as large blue diamonds
+            # Draw assignment nodes as extra large blue diamonds
             if assignment_nodes:
                 nx.draw_networkx_nodes(target_graph, pos,
                                      nodelist=assignment_nodes,
                                      node_color='#3498db',
-                                     node_size=2200,
+                                     node_size=3400,  # Increased from 2200
                                      node_shape='D',  # diamond for assignments
                                      edgecolors='#2980b9',
                                      linewidths=4)
             
-            # Draw function call nodes as green pentagons (star shape)
+            # Draw function call nodes as large green pentagons (star shape)
             if function_call_nodes:
                 nx.draw_networkx_nodes(target_graph, pos,
                                      nodelist=function_call_nodes,
                                      node_color='#2ecc71',
-                                     node_size=2000,
+                                     node_size=3200,  # Increased from 2000
                                      node_shape='*',  # star for function calls
                                      edgecolors='#27ae60',
                                      linewidths=3)
             
-            # Draw operation nodes as medium purple squares
+            # Draw operation nodes as large purple squares
             if operation_nodes:
                 nx.draw_networkx_nodes(target_graph, pos,
                                      nodelist=operation_nodes,
                                      node_color='#9b59b6',
-                                     node_size=1800,
+                                     node_size=3000,  # Increased from 1800
                                      node_shape='s',  # square for operations
                                      edgecolors='#8e44ad',
                                      linewidths=3)
@@ -638,12 +767,12 @@ class DiagramGenerator:
             labels = {}
             for node in target_graph.nodes():
                 value = target_graph.nodes[node].get('value', str(node))
-                if len(str(value)) > 12:
-                    value = str(value)[:9] + "..."
+                if len(str(value)) > 18:  # Allow longer labels
+                    value = str(value)[:15] + "..."
                 labels[node] = value
                 
-            nx.draw_networkx_labels(target_graph, pos, labels, font_size=11, font_weight='bold',
-                                  bbox=dict(boxstyle='round,pad=0.4', facecolor='white',
+            nx.draw_networkx_labels(target_graph, pos, labels, font_size=13, font_weight='bold',
+                                  bbox=dict(boxstyle='round,pad=0.6', facecolor='white',
                                            edgecolor='#8e44ad', alpha=0.95, linewidth=2))
             
             # Add a legend for data dependency graph
@@ -665,10 +794,10 @@ class DiagramGenerator:
             plt.axis('off')
             plt.tight_layout()
             
-            # Save to buffer
+            # Save to buffer with maximum padding for DDG
             buffer = io.BytesIO()
             plt.savefig(buffer, format='svg', bbox_inches='tight', dpi=150, 
-                       pad_inches=0.5, facecolor='#f8f9fa')
+                       pad_inches=2.5, facecolor='#f8f9fa')  # Maximum padding for DDG
             plt.close()
             
             svg_data = buffer.getvalue().decode('utf-8')
