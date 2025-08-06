@@ -426,8 +426,10 @@ def upload_code(request):
                 "ddg": ddg_graph
             })
         except SyntaxError as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Syntax error in {language} code: {str(e)}", exc_info=True)
             return JsonResponse({
-                "error": f"Syntax error in {language} code: {str(e)}"
+                "error": f"Syntax error in {language} code."
             }, status=400)
         except Exception as e:
             # Log the detailed exception message
