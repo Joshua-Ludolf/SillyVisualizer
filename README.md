@@ -121,6 +121,26 @@ curl -X POST http://localhost:3000/visualize \
   -d '{"code":"def f():\n  return 1","language":"python","diagram_type":"ddg"}'
 ```
 
+## Production server
+
+Docker (Gunicorn):
+```bash
+docker compose up --build -d
+# Gunicorn serves wsgi:app on :3000 inside the container
+```
+
+Local production-like run (Windows):
+```powershell
+pip install waitress
+waitress-serve --listen=0.0.0.0:3000 wsgi:app
+```
+
+Local production-like run (macOS/Linux):
+```bash
+pip install gunicorn
+gunicorn -w 4 -k gthread --threads 8 -b 0.0.0.0:3000 wsgi:app
+```
+
 ## Tests
 ```powershell
 pytest -q
