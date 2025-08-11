@@ -1,0 +1,12 @@
+# docker-compose.yml
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sillyvisualizer-app
+    image: "${DOCKER_IMAGE:-sillyvisualizer-app:latest}"
+    env_file: .env
+    ports:
+      - "${APP_PORT:-3000}:3000" # host:container
+    restart: unless-stopped

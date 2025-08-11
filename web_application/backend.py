@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_from_directory, json
 from werkzeug.utils import secure_filename
 import os
-from silly_visualizer import SourceCodeParser, DiagramGenerator
+from .silly_visualizer import SourceCodeParser, DiagramGenerator
 import ast
 import re
 import threading
