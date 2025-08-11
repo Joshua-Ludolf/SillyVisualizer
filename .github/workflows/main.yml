@@ -1,0 +1,28 @@
+name: Deploy Frontend to GitHub Pages
+
+on:
+  push:
+    branches: [ Main ]  # or your default branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+        contents: write
+        pages: write
+        id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy frontend to docs/
+        run: |
+          rm -rf docs
+          mkdir docs
+          cp -r web_application/frontend/* docs/
+          # Optionally, add a .nojekyll file to bypass Jekyll processing
+          touch docs/.nojekyll
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
