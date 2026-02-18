@@ -796,4 +796,5 @@ def get_code_stats(code: str, language: str) -> dict:
 
 
 if __name__ == '__main__':
-    app.run(debug=True, threaded=True)
+    debug_mode = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
+    app.run(debug=debug_mode, threaded=True)
