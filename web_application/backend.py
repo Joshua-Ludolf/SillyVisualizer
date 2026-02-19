@@ -629,14 +629,14 @@ def visualize_code():
             app.logger.error(f"Traceback: {traceback.format_exc()}")
             return jsonify({
                 'error': 'Visualization generation failed',
-                'details': str(viz_error)
+                'details': 'An internal error occurred during visualization generation.'
             }), 500
     
     except Exception as e:
         app.logger.error(f"Request processing error: {str(e)}")
         return jsonify({
             'error': 'Request processing failed',
-            'details': str(e)
+            'details': 'An internal error occurred while processing the request.'
         }), 400
 
 def _get_node_color(node_type: str) -> str:
